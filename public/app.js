@@ -110,8 +110,7 @@ function agentCard(s) {
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
     ${todoHtml ? `<ul class="todos">${todoHtml}</ul>` : ""}
     ${s.lastError ? `<div class="err">⚠ ${esc(s.lastError.type)}: ${esc(s.lastError.message ?? "")}${s.live === false ? " · run exited" : ""}</div>` : ""}
-    ${s.lastError && s.live && s.directory && !stoppedIds.has(s.id) ? `<button class="stopbtn" data-sid="${esc(s.id)}" data-name="${esc(name)}" title="SIGTERM the zcode-cli process in ${esc(s.directory)}">⏹ stop retrying</button>` : ""}
-    ${stoppedIds.has(s.id) ? `<div class="stoppedmark">⏹ stopped by you — retry loop killed</div>` : ""}
+    ${s.lastError && s.directory && stoppedDirs.has(s.directory) ? `<div class="stoppedmark">⏹ stopped by you — project run killed</div>` : ""}
   </div>`;
 }
 
@@ -134,23 +133,27 @@ function currentActivity(s) {
 let filterProject = "all";
 let flashId = null; // banner click → highlight this card until flashUntil
 let flashUntil = 0;
-const stoppedIds = new Set(); // sessions the user stopped this page-load
+const stoppedDirs = new Set(); // projects the user stopped this page-load
 
-async function stopSession(sid, name) {
+// stop is a project action: every zcode-cli process in that directory is
+// the same run, and all of them die together
+async function stopProject(directory, project, procCount) {
   const ok = confirm(
-    `Stop "${name}"?\n\nThis sends SIGTERM to the zcode CLI process working in this session's project directory. The retry loop dies with it.`,
+    `Stop the run in "${project}"?\n\n` +
+    `This SIGTERMs ALL ${procCount} live zcode-cli process${procCount === 1 ? "" : "es"} in\n${directory}\n` +
+    `— every session in this project dies with it, not just the failed one.`,
   );
   if (!ok) return;
   try {
     const res = await fetch("/api/stop", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId: sid }),
+      body: JSON.stringify({ directory }),
     });
     const out = await res.json();
     if (out.killed?.length) {
-      stoppedIds.add(sid);
-      toast(`stopped ${out.label}: SIGTERM → pid ${out.killed.join(", ")}`);
+      stoppedDirs.add(directory);
+      toast(`stopped ${out.project}: SIGTERM → pid ${out.killed.join(", ")}`);
       poll();
     } else {
       toast("could not stop: " + (out.error ?? res.status), true);
@@ -173,7 +176,7 @@ function toast(msg, isErr = false) {
 function onStopClick(e) {
   const btn = e.target.closest(".stopbtn");
   if (!btn) return false;
-  stopSession(btn.dataset.sid, btn.dataset.name);
+  stopProject(btn.dataset.dir, btn.dataset.name, Number(btn.dataset.procs));
   return true;
 }
 
@@ -198,9 +201,6 @@ $("filter").addEventListener("change", () => {
   poll();
 });
 
-// stop buttons on agent cards
-$("tree").addEventListener("click", onStopClick);
-
 function render(state) {
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
 
@@ -220,40 +220,47 @@ function render(state) {
     `Σ in <b>${fmt(state.totals.inputTokens)}</b> · out <b>${fmt(state.totals.outputTokens)}</b> · ` +
     `requests <b>${fmt(state.totals.requests)}</b> · agents <b>${state.sessions.length}</b> · window ${state.windowHours}h`;
 
-  // failures grouped by project, newest group and entry first; live runs
-  // (their zcode-cli process exists) blink and offer stop, dead runs dim.
+  // failures grouped by project directory (stop granularity), newest group
+  // and entry first; live runs blink and offer the project-level stop.
   // Only rewrite on change: constant innerHTML swaps eat clicks mid-flight.
   const failed = state.sessions.filter((s) => s.status === "failed");
-  const anyLive = failed.some((s) => s.live);
-  const groups = new Map();
+  const groups = new Map(); // directory -> sessions[]
   for (const s of [...failed].sort((a, b) => (b.live === true) - (a.live === true) || byLast(a, b))) {
-    const p = s.project ?? "unknown project";
-    if (!groups.has(p)) groups.set(p, []);
-    groups.get(p).push(s);
+    const key = s.directory ?? "?";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
   }
   const ordered = [...groups.entries()].sort(
     (a, b) => (b[1][0].live === true) - (a[1][0].live === true) || (b[1][0].lastAt ?? 0) - (a[1][0].lastAt ?? 0),
   );
   $("alert").classList.toggle("show", failed.length > 0);
-  $("alert").classList.toggle("livefail", anyLive);
+  $("alert").classList.toggle("livefail", failed.some((s) => s.live));
   const alertHtml =
-    `<div class="ah">${anyLive ? "FAILED — live retry loop detected · ⏹ to stop" : "FAILED — no live process (runs already exited)"}</div>` +
-    ordered.map(([proj, list]) => `
+    `<div class="ah">FAILED — click a task to jump · ⏹ stops the whole project run</div>` +
+    ordered.map(([dir, list]) => {
+      const procs = state.liveProcs?.[dir] ?? 0;
+      const proj = list[0].project ?? "unknown project";
+      const stoppable = dir !== "?" && procs > 0 && !stoppedDirs.has(dir);
+      return `
       <div class="agroup">
-        <div class="agroup-head">${esc(proj)}</div>
+        <div class="agroup-head">
+          <span>${esc(proj)}</span>
+          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" title="SIGTERM all ${procs} zcode-cli process(es) in ${esc(dir)}">⏹ stop run (${procs} live)</button>`
+            : stoppedDirs.has(dir) ? `<span class="stoppedmark">⏹ stopped by you</span>` : ""}
+        </div>
         ${list.map((s) => `
           <div class="aentry ${s.live ? "" : "exited"}">
             <span class="entry" data-target="${esc(s.id)}">${esc(sessionLabel(s))}</span>
             <span class="etype">${esc(s.lastError?.type ?? "failed")}</span>
             <span class="ewhen">${agoLong(s.lastAt)}</span>
-            ${s.live ? `<span class="livechip">retrying</span>` : `<span class="exitedchip">run exited</span>`}
-            ${s.live && s.directory ? `<button class="stopbtn" data-sid="${esc(s.id)}" data-name="${esc(sessionLabel(s))}" title="SIGTERM the zcode-cli process in ${esc(s.directory)}">⏹ stop</button>` : ""}
+            ${stoppedDirs.has(dir) ? `<span class="exitedchip">stopped</span>` : s.live ? `<span class="livechip">retrying</span>` : `<span class="exitedchip">run exited</span>`}
           </div>`).join("")}
-      </div>`).join("");
+      </div>`;
+    }).join("");
   if ($("alert").innerHTML !== alertHtml) $("alert").innerHTML = alertHtml;
 
   // active-now strip — only sessions with a heartbeat in the last 5m
-  const actives = state.sessions.filter((s) => s.status === "running" && matches(s) && !stoppedIds.has(s.id)).sort(byLast);
+  const actives = state.sessions.filter((s) => s.status === "running" && matches(s) && !stoppedDirs.has(s.directory)).sort(byLast);
   $("activewrap").style.display = actives.length ? "block" : "none";
   $("activebar").innerHTML = actives.map((s) => {
     const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";

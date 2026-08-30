@@ -19,7 +19,7 @@ bun run start:wide        # show the last 48h instead of 12h
 
 Requires [Bun](https://bun.sh) ≥ 1.1 and a machine where ZCode has been used (it reads ZCode's local telemetry). No dependencies, no build step, no DB writes — the DB is opened `mode=ro` per poll and the agents dir is only ever read.
 
-**The one exception:** the FAILED panel has a ⏹ *stop* action — shown only for failures whose retry loop is actually alive. Liveness comes from `/proc`, not the DB: every poll scans for `zcode-cli` processes whose working directory matches a session's project. A failure whose process is gone is shown dimmed as *run exited* (no blink, no button). Stop sends `SIGTERM` to that process, asks for confirmation first, and the server binds `127.0.0.1` so it is unreachable from the network.
+**The one exception:** the FAILED panel has a ⏹ *stop run* action, **at project level** — that is the real granularity of the mechanism, so it is the granularity of the button. ZCode runs each project's CLI session as `zcode-cli` processes working in the project directory; stop SIGTERMs all of them (the button and the confirm dialog say how many). Liveness comes from `/proc`, not the DB: a failure whose process is gone is shown dimmed as *run exited*, with no button. Stop asks for confirmation first, and the server binds `127.0.0.1` so it is unreachable from the network.
 
 Flags:
 
