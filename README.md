@@ -8,14 +8,22 @@ AgenQ reads (read-only) the telemetry ZCode already writes on disk and turns it 
 - **Token-burn sparklines** — input tokens per request per agent, with a dashed marker at the 200K context cliff (the cliff that cost 36M tokens in the run that motivated this tool — see ahaqqu/agentic-project-template#94)
 - **Live todos** — each agent's todo list, animated as it progresses
 - **Tool ticker** — the latest tool calls across visible sessions
-- **Failure alerts** — rate limits and crashed agents pulse red the moment they happen
+- **Failure alerts** — rate limits and crashed agents turn red the moment they happen; a hollow dot means the process already exited
 
 ## Run it
 
 ```bash
 git clone https://github.com/ahaqqu/AgenQ && cd AgenQ
-bun start                 # → open http://localhost:8787 in your browser
-bun run start:wide        # show the last 48h instead of 12h
+bun link            # one-time — installs the `agenq` command (expects ~/.bun/bin on PATH)
+agenq               # → open http://localhost:8787 in your browser
+agenq --port 8791   # different port, `--window-hours 48` etc. work the same
+agenq               # already running? it restarts the instance on that port
+```
+
+No `bun link`? `bun start` runs the exact same thing without installing. If `agenq` isn't found after linking (e.g. bun managed by mise), symlink it yourself:
+
+```bash
+ln -s "$(pwd)/monitor.mjs" ~/.local/bin/agenq
 ```
 
 Requires [Bun](https://bun.sh) ≥ 1.1 and a machine where ZCode has been used (it reads ZCode's local telemetry). No dependencies, no build step, no DB writes — the DB is opened `mode=ro` per poll and the agents dir is only ever read.
