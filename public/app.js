@@ -103,6 +103,13 @@ function agentCard(s) {
 
 const byLast = (a, b) => (b.lastAt ?? b.firstAt ?? 0) - (a.lastAt ?? a.firstAt ?? 0);
 
+// exactly the name the card below carries: role for subagents, project + title for mains
+function sessionLabel(s) {
+  if (s.role) return s.role;
+  const name = s.title ? (s.project ? s.project + " · " + s.title : s.title) : s.id.slice(0, 12);
+  return s.project && !s.title ? s.project + " · " + s.id.slice(0, 12) : name;
+}
+
 function currentActivity(s) {
   const todo = (s.todos ?? []).find((t) => t.status === "in_progress");
   if (todo) return todo.content;
@@ -110,23 +117,62 @@ function currentActivity(s) {
   return "…";
 }
 
+let filterProject = "all";
+let flashId = null; // banner click → highlight this card until flashUntil
+let flashUntil = 0;
+
+// failure banner → jump to the card below and flash it
+$("alert").addEventListener("click", (e) => {
+  const entry = e.target.closest(".entry");
+  if (!entry) return;
+  flashId = entry.dataset.target;
+  flashUntil = Date.now() + 1800;
+  const el = document.getElementById("root-" + flashId)
+    ?? document.getElementById("kid-" + flashId);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("flash");
+  void el.offsetWidth;
+  el.classList.add("flash");
+});
+
+$("filter").addEventListener("change", () => {
+  filterProject = $("filter").value;
+  poll();
+});
+
 function render(state) {
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
-  $("empty").style.display = state.sessions.length ? "none" : "block";
+
+  // project filter dropdown
+  const projects = [...new Set(state.sessions.map((s) => s.project).filter(Boolean))].sort();
+  const sel = $("filter");
+  const selected = [...sel.options].some((o) => o.value === filterProject) ? filterProject : "all";
+  sel.innerHTML = `<option value="all">all projects</option>` +
+    projects.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+  sel.value = selected;
+  filterProject = sel.value;
+  const matches = (s) => filterProject === "all" || s.project === filterProject;
+  $("empty").style.display = state.sessions.some(matches) ? "none" : "block";
 
   // totals
   $("totals").innerHTML =
     `Σ in <b>${fmt(state.totals.inputTokens)}</b> · out <b>${fmt(state.totals.outputTokens)}</b> · ` +
     `requests <b>${fmt(state.totals.requests)}</b> · agents <b>${state.sessions.length}</b> · window ${state.windowHours}h`;
 
-  // rate-limit / failure banner
+  // rate-limit / failure banner — same names as the cards, click to jump.
+  // Only rewrite on change: constant innerHTML swaps eat clicks mid-flight.
   const failed = state.sessions.filter((s) => s.status === "failed");
   $("alert").classList.toggle("show", failed.length > 0);
-  if (failed.length)
-    $("alert").textContent = "⚠ " + failed.map((s) => `${s.role ?? s.id.slice(0, 12)}: ${s.lastError?.type ?? "failed"}`).join(" · ");
+  const alertHtml = failed.length
+    ? "⚠ " + failed.map((s) =>
+        `<span class="entry" data-target="${esc(s.id)}">${esc(sessionLabel(s))} · ${esc(s.lastError?.type ?? "failed")}</span>`,
+      ).join(" · ")
+    : "";
+  if ($("alert").innerHTML !== alertHtml) $("alert").innerHTML = alertHtml;
 
-  // active-now strip — only sessions with a heartbeat in the last 90s
-  const actives = state.sessions.filter((s) => s.status === "running").sort(byLast);
+  // active-now strip — only sessions with a heartbeat in the last 5m
+  const actives = state.sessions.filter((s) => s.status === "running" && matches(s)).sort(byLast);
   $("activewrap").style.display = actives.length ? "block" : "none";
   $("activebar").innerHTML = actives.map((s) => {
     const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";
@@ -143,24 +189,34 @@ function render(state) {
   const rootNodes = state.roots.map((rid) => byId.get(rid)).filter(Boolean).sort(byLast);
   for (const root of rootNodes) {
     if (!root) continue;
+    if (!matches(root)) continue;
     seen.add(root.id);
     const kids = (root.children ?? []).map((c) => byId.get(c)).filter(Boolean).sort(byLast);
     kids.forEach((k) => seen.add(k.id));
     sections.push(`
-      <div class="root">
+      <div class="root" id="root-${esc(root.id)}">
         <div class="head">
           <span class="status ${esc(root.status)}"></span>
           <span>🧑‍✈️</span>
+          ${root.project ? `<span class="proj">${esc(root.project)}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
           <span class="meta">${fmt(root.inputTokens)} in · ${root.requests} reqs · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
         <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
       </div>`);
   }
-  const orphans = state.sessions.filter((s) => !seen.has(s.id)).sort(byLast);
+  const orphans = state.sessions.filter((s) => !seen.has(s.id) && matches(s)).sort(byLast);
   if (orphans.length)
     sections.push(`<div class="root"><div class="head"><span class="title">other sessions</span></div><div class="kids">${orphans.map(agentCard).join("")}</div></div>`);
   $("tree").innerHTML = sections.join("");
+
+  // re-apply the banner-jump highlight; re-renders would otherwise wipe it
+  if (flashId && Date.now() < flashUntil) {
+    document.getElementById("root-" + flashId)?.classList.add("flash");
+    document.getElementById("kid-" + flashId)?.classList.add("flash");
+  } else if (flashId) {
+    flashId = null;
+  }
 
   for (const s of state.sessions) {
     const c = document.getElementById("spark-" + s.id);
@@ -173,7 +229,7 @@ function render(state) {
   $("ticker").innerHTML = state.ticker.map((t) => {
     const isNew = !known.has(t.at + t.tool) && prevTicker.length > 0;
     const agent = byId.get(t.sessionId);
-    return `<li class="${isNew ? "new" : ""}"><span>${ago(t.at)}</span><span class="t">${esc(agent?.role ?? "session")}</span><span>${esc(t.tool)}</span><span>${t.status ?? ""} ${t.outputBytes != null ? "· " + fmt(t.outputBytes) + "B" : ""}</span></li>`;
+    return `<li class="${isNew ? "new" : ""}"><span>${ago(t.at)}</span><span class="t">${esc(agent ? sessionLabel(agent) : "session")}</span><span>${esc(t.tool)}</span><span>${t.status ?? ""} ${t.outputBytes != null ? "· " + fmt(t.outputBytes) + "B" : ""}</span></li>`;
   }).join("");
 
   prev = state;

@@ -94,7 +94,7 @@ function gatherDb() {
 
     let titles = [];
     try {
-      titles = rows(db, `SELECT id, title, parent_id, time_updated FROM session`);
+      titles = rows(db, `SELECT id, title, parent_id, directory FROM session`);
     } catch {
       // older CLI builds may lack columns; titles are decorative
     }
@@ -158,7 +158,16 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
 
   const sessions = new Map();
 
-  const titleById = new Map(titles.map((t) => [t.id, t]));
+  // project = last path segment of the session's working directory
+  const titleById = new Map(
+    titles.map((t) => [
+      t.id,
+      {
+        ...t,
+        project: t.directory ? (t.directory.split("/").filter(Boolean).pop() ?? null) : null,
+      },
+    ]),
+  );
   const ensure = (id) => {
     if (!sessions.has(id)) {
       const t = titleById.get(id);
@@ -166,6 +175,7 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
         id,
         title: t?.title ?? null,
         parentId: t?.parent_id ?? null,
+        project: t?.project ?? null,
         role: null,
         model: null,
         status: "idle",
@@ -236,6 +246,7 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
     child.parentSessionId = l.parentSessionId;
     child.role = l.role;
     child.model = l.model;
+    child.project = child.project ?? titleById.get(l.parentSessionId)?.project ?? null;
     child.linkStatus = l.status;
     child.description = l.description;
     if (l.error && !child.lastError) child.lastError = { type: "agent_failed", message: l.error, at: l.completedAt };

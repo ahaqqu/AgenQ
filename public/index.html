@@ -24,7 +24,11 @@
   header h1 span { color: var(--accent); }
   .totals { color: var(--dim); font-size: 12px; }
   .totals b { color: var(--text); }
-  #poll { margin-left: auto; font-size: 11px; color: var(--dim); }
+  #filter {
+    margin-left: auto; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 6px;
+  }
+  #poll { font-size: 11px; color: var(--dim); }
   #poll .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 5px; }
   #poll.stale .dot { background: var(--fail); }
   main { padding: 18px 20px 40px; }
@@ -35,6 +39,10 @@
   }
   .alert.show { display: block; }
   @keyframes blink { 50% { border-color: transparent; } }
+  .alert .entry { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .alert .entry:hover { color: #fff; }
+  .proj { color: var(--accent); font-weight: 700; }
+  .root.flash { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
   .tree { display: flex; flex-direction: column; gap: 14px; }
   .root { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
   .root > .head {
@@ -95,6 +103,7 @@
 <header>
   <h1>Agen<span>Q</span> — mission control</h1>
   <div class="totals" id="totals"></div>
+  <select id="filter" title="filter by project"></select>
   <div id="poll"><span class="dot"></span><span id="poll-text">connecting…</span></div>
 </header>
 <main>
