@@ -158,6 +158,8 @@ function gatherDb() {
              COUNT(*)            AS requests,
              SUM(input_tokens)   AS input_tokens,
              SUM(output_tokens)  AS output_tokens,
+             SUM(cache_read_input_tokens)    AS cache_read,
+             SUM(cache_creation_input_tokens) AS cache_create,
              MAX(input_tokens)   AS max_context,
              MAX(completed_at)   AS last_at,
              MIN(started_at)     AS first_at
@@ -181,8 +183,11 @@ function gatherDb() {
       WHERE status IN ('completed', 'cancelled')
       GROUP BY session_id`);
 
+    // zcode stores "completed"; the UI and CSS speak "done"
     const todos = run("todos", `
-      SELECT session_id, content, status, position
+      SELECT session_id, content,
+             CASE WHEN status = 'completed' THEN 'done' ELSE status END AS status,
+             position
       FROM todo ORDER BY session_id, position`);
 
     const tools = run("tools", `
@@ -309,6 +314,8 @@ async function assemble({ usage, spark, errors, lastok, todos, tools, titles, li
     s.requests = r.requests;
     s.inputTokens = r.input_tokens;
     s.outputTokens = r.output_tokens;
+    s.cacheRead = r.cache_read;
+    s.cacheCreate = r.cache_create;
     s.maxContext = r.max_context;
     s.firstAt = r.first_at;
     s.lastAt = r.last_at;
@@ -512,7 +519,9 @@ function sessionDetail(id) {
     const errors = q(`SELECT error_type, error_message, completed_at FROM model_usage
                       WHERE session_id = ? AND error_type IS NOT NULL
                       ORDER BY completed_at DESC LIMIT 3`, [id]);
-    const todos = q(`SELECT content, status FROM todo WHERE session_id = ? ORDER BY position`, [id]);
+    const todos = q(`SELECT content,
+                            CASE WHEN status = 'completed' THEN 'done' ELSE status END AS status
+                     FROM todo WHERE session_id = ? ORDER BY position`, [id]);
 
     return {
       sessionId: id,
@@ -537,6 +546,93 @@ function sessionDetail(id) {
       modelWindow: modelWindow(turns[0]?.model_id),
       errors: errors.map((e) => ({ type: e.error_type, message: head(e.error_message ?? "", 200), at: e.completed_at })),
       todos: todos.map((t) => ({ content: t.content, status: t.status })),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+// ---------- live conversation (the /conversation.html feed) ----------
+
+// The conversation lives in `message` (role, sequence) × `part` (text /
+// reasoning / tool rows). The client polls with the cursor returned here —
+// the (message-sequence, part-sequence) pair of the last row it saw — and
+// only rows past that pair come back, so a poll moves bytes proportional
+// to what was actually said, not to the size of the session.
+const CONV_TEXT_CAP = 12_000;
+const CONV_THINK_CAP = 6_000;
+const CONV_INPUT_CAP = 2_000;
+const CONV_TAIL_PARTS = 400; // first load: the last N part rows, not the whole session
+
+const convSel = `
+  SELECT json_extract(m.data, '$.role') AS role,
+         coalesce(m.sequence, 0) AS mseq,
+         coalesce(p.sequence, 0) AS pseq,
+         json_extract(p.data, '$.type') AS ptype,
+         p.data AS pdata,
+         p.time_created AS at
+  FROM part p JOIN message m ON p.message_id = m.id`;
+
+function convItem(r) {
+  let d;
+  try { d = JSON.parse(r.pdata); } catch { return null; }
+  if (r.ptype === "text") {
+    const text = String(d.text ?? "");
+    if (!text.trim()) return null;
+    return { kind: "text", role: r.role, text: head(text, CONV_TEXT_CAP), at: r.at };
+  }
+  if (r.ptype === "reasoning") {
+    const text = String(d.text ?? "");
+    if (!text.trim()) return null;
+    return { kind: "think", role: r.role, text: tail(text, CONV_THINK_CAP), at: r.at };
+  }
+  if (r.ptype === "tool") {
+    const input = JSON.stringify(d.state?.input ?? {}) ?? "{}";
+    return {
+      kind: "tool",
+      role: r.role,
+      tool: d.tool ?? "?",
+      status: d.state?.status ?? null,
+      input: input === "{}" ? null : head(input, CONV_INPUT_CAP),
+      at: r.at,
+    };
+  }
+  return null; // step-start/step-finish/timeline/file/compaction are scaffolding
+}
+
+function sessionMessages(id, after) {
+  const db = roDb();
+  try {
+    const sess = rows(db, `SELECT title, directory FROM session WHERE id = ?`, [id])[0] ?? null;
+    let cursor = after ?? "0:0";
+    let parts;
+    if (after) {
+      const [a, b] = String(after).split(":").map(Number);
+      const from = [Number.isFinite(a) ? a : 0, Number.isFinite(b) ? b : 0];
+      parts = rows(db, `${convSel}
+        WHERE p.session_id = ?
+          AND (coalesce(m.sequence,0), coalesce(p.sequence,0)) > (?, ?)
+        ORDER BY coalesce(m.sequence,0), coalesce(p.sequence,0)
+        LIMIT ${CONV_TAIL_PARTS}`, [id, ...from]);
+    } else {
+      // first load: newest CONV_TAIL_PARTS rows, oldest-first for rendering
+      parts = rows(db, `${convSel}
+        WHERE p.session_id = ?
+        ORDER BY coalesce(m.sequence,0) DESC, coalesce(p.sequence,0) DESC
+        LIMIT ${CONV_TAIL_PARTS}`, [id]).reverse();
+    }
+    const items = [];
+    for (const r of parts) {
+      cursor = `${r.mseq}:${r.pseq}`;
+      const item = convItem(r);
+      if (item) items.push(item);
+    }
+    return {
+      sessionId: id,
+      title: sess?.title ?? null,
+      directory: sess?.directory ?? null,
+      cursor,
+      items,
     };
   } finally {
     db.close();
@@ -650,6 +746,14 @@ function startServer() {
         return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
       }
     }
+    const msgs = url.pathname.match(/^\/api\/session\/([^/]+)\/messages$/);
+    if (msgs && req.method === "GET") {
+      try {
+        return Response.json(sessionMessages(decodeURIComponent(msgs[1]), url.searchParams.get("after")));
+      } catch (e) {
+        return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
+      }
+    }
     if (url.pathname === "/api/state") {
       try {
         lastGood = await snapshot();
@@ -669,7 +773,12 @@ function startServer() {
     if (await file.exists()) {
       const ext = "." + rel.split(".").pop();
       return new Response(file, {
-        headers: { "content-type": CONTENT_TYPES[ext] ?? "application/octet-stream" },
+        headers: {
+          "content-type": CONTENT_TYPES[ext] ?? "application/octet-stream",
+          // the UI is a dev tool that changes often — never let the browser
+          // serve a stale board from heuristic caching
+          "cache-control": "no-cache",
+        },
       });
     }
     return new Response("not found", { status: 404 });

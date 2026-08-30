@@ -10,6 +10,9 @@ AgenQ reads (read-only) the telemetry ZCode already writes on disk and turns it 
 - **Token-burn sparklines** — input tokens per request per agent, with a dashed marker at the 200K context cliff (the cliff that cost 36M tokens in the run that motivated this tool — see ahaqqu/agentic-project-template#94)
 - **Live todos** — each agent's todo list, animated as it progresses
 - **Active Now strip** — every session with a heartbeat in the last 5m; click a row to expand it into a live detail panel: the current tool call with its actual arguments, the latest thinking excerpt, todo progress, diff summary, context-window fill, turn timings (duration, time-to-first-token, retries), a full token breakdown (cache read/write, reasoning) and recent errors
+- **Live conversation** — the 💬 button on an Active Now row opens the session's full conversation in a new tab (user prompts, assistant replies, collapsed thinking, tool calls with status), streaming new messages as they happen
+
+![AgenQ live conversation — this README's own editing session, streaming](docs/screenshot-conversation.png)
 - **Tool ticker** — the latest tool calls across visible sessions
 - **Failure alerts** — rate limits and crashed agents turn red the moment they happen; a hollow dot means the process already exited
 
@@ -47,6 +50,7 @@ bun monitor.mjs --port 8787 --window-hours 12 \
 |---|---|
 | `~/.zcode/cli/db/db.sqlite` (`model_usage`, `tool_usage`, `todo`, `session`) | token heartbeats, sparklines, tool ticker, todo lists, session titles |
 | `~/.zcode/cli/db/db.sqlite` (`part`, `model_usage`) — read lazily per click | the Active Now detail panel: tool arguments and thinking text (`part`), turn timings and the token breakdown (`model_usage`) |
+| `~/.zcode/cli/db/db.sqlite` (`message`, `part`) — read lazily per poll | the live conversation tab: message roles and sequence (`message`), text/reasoning/tool parts (`part`) |
 | `~/.zcode/cli/agents/<parent>/agent_*/metadata.json` | the manager→subagent tree, role profiles, status, failures |
 
 Note: `session_task_link` in the DB belongs to ZCode's (currently unused) workflow framework — the real parent/child links live in the agents-dir metadata files, which is why the monitor joins both sources.

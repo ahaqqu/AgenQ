@@ -83,7 +83,6 @@ function drawSpark(canvas, series) {
 function agentCard(s) {
   const emoji = ROLE_EMOJI[s.role] ?? "🤖";
   const name = s.role ?? (s.title ? "main" : "session");
-  const over = s.maxContext > CTX_LIMIT;
   const sparkId = "spark-" + s.id;
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
@@ -98,43 +97,115 @@ function agentCard(s) {
       <span class="name">${esc(name)}</span>
       <span class="model">${esc(s.model ?? "")}</span>
     </div>
-    <div class="nums">
-      <span>in <b>${fmt(s.inputTokens)}</b></span>
-      <span>out <b>${fmt(s.outputTokens)}</b></span>
-      <span>reqs <b>${s.requests}</b></span>
-      <span>ctx max <b class="${over ? "over" : ""}">${fmt(s.maxContext)}</b></span>
-      <span style="margin-left:auto">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</span>
-    </div>
+    <div class="nums"><span class="stats">${statsHtml(s)}</span><span class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</span></div>
     <canvas class="spark" id="${sparkId}"></canvas>
     <div class="cap">input tokens / request — dashed line = ${fmt(CTX_LIMIT)} context cliff</div>
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
     ${todoHtml ? `<ul class="todos">${todoHtml}</ul>` : ""}
-    ${s.lastError ? `<div class="err">⚠ ${esc(s.lastError.type)}: ${esc(s.lastError.message ?? "")}${s.live === false ? " · run exited" : ""}</div>` : ""}
+    ${s.lastError ? `<div class="err">⚠ ${esc(humanType(s.lastError.type))}: ${esc(s.lastError.message ?? "")}${s.live === false ? " · run exited" : ""}</div>` : ""}
     ${s.lastError && s.directory && stoppedDirs.has(s.directory) ? `<div class="stoppedmark">⏹ stopped by you — project run killed</div>` : ""}
   </div>`;
 }
 
 const byLast = (a, b) => (b.lastAt ?? b.firstAt ?? 0) - (a.lastAt ?? a.firstAt ?? 0);
 
-// exactly the name the card below carries: role for subagents, project + title for mains
-function sessionLabel(s) {
-  if (s.role) return s.role;
-  const name = s.title ? (s.project ? s.project + " · " + s.title : s.title) : s.id.slice(0, 12);
-  return s.project && !s.title ? s.project + " · " + s.id.slice(0, 12) : name;
+// tight rows (Active Now chips, ticker, alert) have no room for long names:
+// projects become acronyms (agentic-project-template → APT, worktree suffix
+// kept: -wt95). The role emoji carries the role; tree cards keep the full
+// names and tooltips always carry the full text.
+const shortProject = (p) => {
+  if (!p || p.length <= 10) return p ?? "";
+  const parts = p.split(/[-_.]/).filter(Boolean);
+  return parts.map((s) => (/\d/.test(s) ? "-" + s : s[0].toUpperCase())).join("");
+};
+
+// same-role siblings under one parent get instance numbers (1/3, 2/3 …) in
+// dispatch order — recomputed from each snapshot so it can't go stale
+let instOf = new Map(); // session id -> { i, n }
+function computeInstances(sessions) {
+  instOf = new Map();
+  const groups = new Map(); // parent|role -> sessions[]
+  for (const s of sessions) {
+    if (!s.role) continue;
+    const k = (s.parentSessionId ?? "?") + "|" + s.role;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(s);
+  }
+  for (const list of groups.values()) {
+    list.sort((a, b) => (a.firstAt ?? 0) - (b.firstAt ?? 0));
+    list.forEach((s, i) => instOf.set(s.id, { i: i + 1, n: list.length }));
+  }
 }
 
-// same, with the project in blue like the panel titles
-function labelHtml(s) {
-  const name = s.role ?? s.title ?? s.id.slice(0, 12);
-  return s.project
-    ? `<span class="proj">${esc(s.project)}</span> · ${esc(name)}`
-    : esc(name);
+// everything that identifies an agent, untruncated — for tooltips
+function fullLabel(s) {
+  const proj = s.project ? s.project + " · " : "";
+  if (s.role) {
+    const tag = instOf.get(s.id);
+    return proj + s.role + (tag ? ` (${tag.i} of ${tag.n})` : "") +
+      (s.description ? ` — ${s.description}` : "");
+  }
+  return proj + (s.title ?? s.id.slice(0, 12));
 }
+
+// instance fraction for the right-hand side ("2/5"); empty for main sessions
+const instTag = (s) => {
+  const t = instOf.get(s.id);
+  return t ? `${t.i}/${t.n}` : "";
+};
+// prefix right-side text with it: "2/5 · Agent failed"
+const tagged = (text, s) => {
+  const tag = instTag(s);
+  return tag ? `${tag} · ${text}` : text;
+};
+
+// compact label for the tight rows: left side is only who+brief — project
+// (short) and task description; the instance fraction lives on the right
+// of the dash. Full role name stays in the tooltip (fullLabel).
+function labelHtml(s) {
+  const proj = s.project
+    ? `<span class="proj" title="${esc(s.project)}">${esc(shortProject(s.project))}</span>`
+    : "";
+  if (s.role) {
+    return s.description ? (proj ? proj + " · " : "") + esc(s.description) : proj;
+  }
+  const tail = esc(s.title ?? s.id.slice(0, 12));
+  return proj ? proj + " · " + tail : tail;
+}
+
+// mcp__server__tool → mcp:server:tool — same meaning, less ticker noise
+const prettyTool = (t) => String(t ?? "").replace(/^mcp__/, "mcp:").replace(/__/g, ":");
+
+const roleIcon = (s) => (s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️");
+
+// threshold colors shared by the chip right side and the card headers:
+// green = comfortable, amber = getting close, red = critical
+const chCls = (ch) => ch >= 0.9 ? "st-good" : ch >= 0.7 ? "st-warn" : "st-hot";
+const ctxCls = (frac) => frac >= 0.9 ? "st-hot" : frac >= 0.7 ? "st-warn" : "st-good";
+// requests per session: 0–100 green, 100–200 amber, >200 red
+const reqCls = (n) => n > 200 ? "st-hot" : n >= 100 ? "st-warn" : "st-good";
+
+// one stats grammar everywhere: "ch 99.99% · in 12.46M · out 73.2k ·
+// 133 reqs · ctx 148.4k". ch = cache hit: zcode's input_tokens already
+// includes the cached part, so it's cache-read / input. ctx is measured
+// against the 200k cliff.
+function statsHtml(s) {
+  const ch = (s.inputTokens ?? 0) > 0 ? (s.cacheRead ?? 0) / s.inputTokens : null;
+  return (ch != null ? `ch <span class="st ${chCls(ch)}">${(ch * 100).toFixed(2)}%</span> · ` : "") +
+    `in <b>${fmt(s.inputTokens)}</b> · out <b>${fmt(s.outputTokens)}</b> · reqs <b class="st ${reqCls(s.requests)}">${s.requests}</b> · ` +
+    `ctx <b class="st ${ctxCls((s.maxContext ?? 0) / CTX_LIMIT)}">${fmt(s.maxContext)}</b>`;
+}
+
+// agent_failed → "Agent failed" — statuses are for the DB, people read prose
+const humanType = (t) => {
+  const s = String(t ?? "");
+  return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
+};
 
 function currentActivity(s) {
   const todo = (s.todos ?? []).find((t) => t.status === "in_progress");
   if (todo) return todo.content;
-  if (s.lastTool) return s.lastTool.name;
+  if (s.lastTool) return prettyTool(s.lastTool.name);
   return "…";
 }
 
@@ -212,13 +283,13 @@ function detailHtml(entry) {  if (!entry || (!entry.data && !entry.error)) retur
 
   out.push(`<div class="dsec"><span class="dlab">tokens</span><span class="dval">` +
     `<div class="trow">in ${fmt(tk.input ?? 0)} <span class="dim">(cache-read ${fmt(tk.cacheRead ?? 0)}, cache-write ${fmt(tk.cacheCreate ?? 0)})</span>` +
-    ` · out ${fmt(tk.output ?? 0)} <span class="dim">(reasoning ${fmt(tk.reasoning ?? 0)})</span> · ${tk.requests ?? 0} reqs</div>` +
+    ` · out ${fmt(tk.output ?? 0)} <span class="dim">(reasoning ${fmt(tk.reasoning ?? 0)})</span> · reqs ${tk.requests ?? 0}</div>` +
     (d.turns?.[0] ? `<div class="trow dim">latest turn: in ${fmt(d.turns[0].input_tokens)} / out ${fmt(d.turns[0].output_tokens)} / reasoning ${fmt(d.turns[0].reasoning_tokens)}</div>` : "") +
     `</span></div>`);
 
   if (d.errors?.length)
     out.push(`<div class="dsec"><span class="dlab">errors</span><span class="dval">` +
-      d.errors.map((e) => `<div class="trow del">✗ ${esc(e.type)}: ${esc(e.message ?? "")} <span class="dim">${ago(e.at)}</span></div>`).join("") +
+      d.errors.map((e) => `<div class="trow del">✗ ${esc(humanType(e.type))}: ${esc(e.message ?? "")} <span class="dim">${ago(e.at)}</span></div>`).join("") +
       `</span></div>`);
 
   return out.join("");
@@ -309,8 +380,14 @@ $("activetoggle").addEventListener("click", () => {
   w.classList.toggle("collapsed");
   w.querySelector(".caret").textContent = w.classList.contains("collapsed") ? "▸" : "▾";
 });
-// click a chip → expand its detail panel (fetched lazily, refreshed while open)
+// click a chip → expand its detail panel (fetched lazily, refreshed while open);
+// the 💬 button opens the live conversation in a new tab instead
 $("activebar").addEventListener("click", (e) => {
+  const conv = e.target.closest(".convbtn");
+  if (conv) {
+    window.open("/conversation.html#" + encodeURIComponent(conv.dataset.conv), "_blank");
+    return;
+  }
   const chip = e.target.closest(".chip");
   if (!chip) return;
   const id = chip.dataset.session;
@@ -343,6 +420,7 @@ function render(state) {
   const selection = document.getSelection();
   if (selection && !selection.isCollapsed) return;
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
+  computeInstances(state.sessions);
 
   // project filter dropdown
   const projects = [...new Set(state.sessions.map((s) => s.project).filter(Boolean))].sort();
@@ -384,17 +462,19 @@ function render(state) {
       return `
       <div class="agroup">
         <div class="agroup-head">
-          <span>${esc(proj)}</span>
-          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" title="SIGTERM all ${procs} zcode-cli process(es) in ${esc(dir)}">⏹ kill process</button>`
+          <span title="${esc(dir)}">${esc(shortProject(proj))}</span>
+          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" title="SIGTERM all ${procs} zcode-cli process(es) in ${esc(dir)}">⏹ kill ${procs} process${procs === 1 ? "" : "es"}</button>`
             : stoppedDirs.has(dir) ? `<span class="stoppedmark">⏹ stopped by you</span>` : ""}
         </div>
-        ${list.map((s) => `
+        ${list.map((s) => {
+          const state = stoppedDirs.has(dir) ? "stopped by you" : s.live ? "" : "run exited";
+          return `
           <div class="aentry ${s.live ? "" : "exited"}">
-            <span class="entry" data-target="${esc(s.id)}">${labelHtml(s)}</span>
-            <span class="etype">${esc(s.lastError?.type ?? "failed")}</span>
-            <span class="ewhen">${agoLong(s.lastAt)}</span>
-            ${stoppedDirs.has(dir) ? `<span class="exitedchip">stopped</span>` : s.live ? `<span class="livechip">process alive</span>` : `<span class="exitedchip">run exited</span>`}
-          </div>`).join("")}
+            <span class="entry" data-target="${esc(s.id)}" title="${esc(fullLabel(s))}"><span class="ic">${roleIcon(s)}</span>${labelHtml(s)}</span>
+            <span class="act">· ${esc(humanType(s.lastError?.type ?? "failed"))}</span>
+            <span class="r">- ${esc(tagged([agoLong(s.lastAt), state].filter(Boolean).join(" · "), s))}</span>
+          </div>`;
+        }).join("")}
       </div>`;
     }).join("");
   if ($("alert").innerHTML !== alertHtml) $("alert").innerHTML = alertHtml;
@@ -405,13 +485,14 @@ function render(state) {
   $("activebar").innerHTML = actives.map((s) => {
     const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";
     const doing = currentActivity(s);
+    const st = s.lastTool?.status && doing === s.lastTool.name ? ` ${s.lastTool.status}` : "";
     const open = expandedId === s.id;
-    return `<div class="chip ${open ? "open" : ""}" data-session="${esc(s.id)}"><span class="exp">${open ? "▾" : "▸"}</span><span class="status running"></span><span>${emoji}</span>` +
-      `<span class="t" title="${esc(s.title ?? s.role ?? "")}">${labelHtml(s)}</span>` +
-      `<span class="d" title="${esc(doing)}">${esc(doing)}</span>` +
-      `<span class="stats">in <b>${fmt(s.inputTokens)}</b> · out <b>${fmt(s.outputTokens)}</b> · ${s.requests} reqs · ` +
-      `ctx <b class="${s.maxContext > CTX_LIMIT ? "over" : ""}" title="max single-request input — dashed cliff is ${fmt(CTX_LIMIT)}">${fmt(s.maxContext)}</b></span>` +
-      `<span class="ago">${ago(s.lastAt)}</span></div>` +
+    return `<div class="chip ${open ? "open" : ""}" data-session="${esc(s.id)}">` +
+      `<button class="convbtn" data-conv="${esc(s.id)}" title="open the live conversation in a new tab">💬 live</button>` +
+      `<span class="status running"></span><span>${emoji}</span>` +
+      `<span class="l" title="${esc(fullLabel(s))}">${labelHtml(s)} <span class="act" title="${esc(doing)}">${esc(doing + st)}</span></span>` +
+      `<span class="dash">-</span>` +
+      `<span class="r">${instTag(s) ? esc(instTag(s)) + " · " : ""}${statsHtml(s)} · ${ago(s.lastAt)}</span></div>` +
       (open ? `<div class="chipdetail" id="detail-${esc(s.id)}">${detailHtml(detailCache.get(s.id))}</div>` : "");
   }).join("");
 
@@ -430,9 +511,9 @@ function render(state) {
         <div class="head">
           <span class="status ${esc(root.status === "failed" && root.live === false ? "exited" : root.status)}" title="${esc(root.status)}${root.live === false ? " · process exited" : ""}"></span>
           <span>🧑‍✈️</span>
-          ${root.project ? `<span class="proj">${esc(root.project)}</span>` : ""}
+          ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
-          <span class="meta">${fmt(root.inputTokens)} in · ${root.requests} reqs · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
+          <span class="meta">${statsHtml(root)} · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
         <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
       </div>`);
@@ -461,7 +542,14 @@ function render(state) {
   $("ticker").innerHTML = state.ticker.map((t) => {
     const isNew = !known.has(t.at + t.tool) && prevTicker.length > 0;
     const agent = byId.get(t.sessionId);
-    return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="click to jump to the session card"><span>${ago(t.at)}</span><span class="t">${agent ? labelHtml(agent) : "session"}</span><span>${esc(t.tool)}</span><span>${t.status ?? ""} ${t.outputBytes != null ? "· " + fmt(t.outputBytes) + "B" : ""}</span></li>`;
+    // same tooltip vocabulary as the chips and FAILED rows: full project,
+    // role, instance and brief — plus what the tool call actually was
+    const tip = (agent ? fullLabel(agent) : t.sessionId) +
+      ` — ${prettyTool(t.tool)}` +
+      (t.status ? ` · ${t.status}` : "") +
+      (t.outputBytes != null ? ` · ${fmt(t.outputBytes)}B` : "");
+    const right = [t.outputBytes != null ? `${fmt(t.outputBytes)}B` : "", ago(t.at)].filter(Boolean).join(" · ");
+    return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="${esc(tip)}"><span class="l">${agent ? roleIcon(agent) + " " + labelHtml(agent) : "session"} <span class="act">${esc(prettyTool(t.tool))} ${t.status ?? ""}</span></span><span class="dash">-</span><span class="r">${esc(tagged(right, agent))}</span></li>`;
   }).join("");
 
   prev = state;
