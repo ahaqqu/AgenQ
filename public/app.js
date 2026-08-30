@@ -211,14 +211,21 @@ $("filter").addEventListener("change", () => {
 
 // legend — built from the same constants the board uses, so it can't drift
 $("legendbtn").addEventListener("click", () => $("legend").classList.toggle("show"));
+
+// collapsible ACTIVE NOW panel
+$("activetoggle").addEventListener("click", () => {
+  const w = $("activewrap");
+  w.classList.toggle("collapsed");
+  w.querySelector(".caret").textContent = w.classList.contains("collapsed") ? "▸" : "▾";
+});
 $("legend").innerHTML = `
   <div class="lgroup">
     <div class="lhead">STATUS DOTS</div>
-    <div class="lrow"><span class="status running"></span> running — model requests in the last 5m, CLI process alive</div>
-    <div class="lrow"><span class="status sleep"></span> sleep — process alive but idle 5m+ (card time shows 💤)</div>
-    <div class="lrow"><span class="status done"></span> done — subagent finished cleanly</div>
-    <div class="lrow"><span class="status failed"></span> failed — last request errored / agent crashed; pulsing means the retry loop is still alive</div>
-    <div class="lrow"><span class="status exited"></span> exited — no live CLI process for this project anymore; the run is over</div>
+    <div class="lrow"><span class="status running"></span> green pulse — running: model requests in the last 5m, CLI process alive</div>
+    <div class="lrow"><span class="status sleep"></span> blue — sleep: process alive but idle 5m+ (card time shows 💤)</div>
+    <div class="lrow"><span class="status done"></span> gray — done: finished, nothing running anymore</div>
+    <div class="lrow"><span class="status failed"></span> red — failed: the most recent request errored; hollow dot means the process already exited</div>
+    <div class="lrow"><span class="status exited"></span> hollow — exited: no live CLI process for this project anymore; the run is over</div>
   </div>
   <div class="lgroup">
     <div class="lhead">ICONS</div>
@@ -231,6 +238,10 @@ $("legend").innerHTML = `
   </div>`;
 
 function render(state) {
+  // copying something? defer the re-render until the selection is gone —
+  // swapping innerHTML on a 1.5s timer yanks text out from under the cursor
+  const selection = document.getSelection();
+  if (selection && !selection.isCollapsed) return;
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
 
   // project filter dropdown
@@ -282,7 +293,7 @@ function render(state) {
             <span class="entry" data-target="${esc(s.id)}">${labelHtml(s)}</span>
             <span class="etype">${esc(s.lastError?.type ?? "failed")}</span>
             <span class="ewhen">${agoLong(s.lastAt)}</span>
-            ${stoppedDirs.has(dir) ? `<span class="exitedchip">stopped</span>` : s.live ? `<span class="livechip">retrying</span>` : `<span class="exitedchip">run exited</span>`}
+            ${stoppedDirs.has(dir) ? `<span class="exitedchip">stopped</span>` : s.live ? `<span class="livechip">process alive</span>` : `<span class="exitedchip">run exited</span>`}
           </div>`).join("")}
       </div>`;
     }).join("");
@@ -295,8 +306,10 @@ function render(state) {
     const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";
     const doing = currentActivity(s);
     return `<div class="chip"><span class="status running"></span><span>${emoji}</span>` +
-      `<span class="t">${labelHtml(s)}</span>` +
+      `<span class="t" title="${esc(s.title ?? s.role ?? "")}">${labelHtml(s)}</span>` +
       `<span class="d" title="${esc(doing)}">${esc(doing)}</span>` +
+      `<span class="stats">in <b>${fmt(s.inputTokens)}</b> · out <b>${fmt(s.outputTokens)}</b> · ${s.requests} reqs · ` +
+      `ctx <b class="${s.maxContext > CTX_LIMIT ? "over" : ""}" title="max single-request input — dashed cliff is ${fmt(CTX_LIMIT)}">${fmt(s.maxContext)}</b></span>` +
       `<span class="ago">${ago(s.lastAt)}</span></div>`;
   }).join("");
 

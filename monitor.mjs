@@ -46,6 +46,82 @@ function parseArgs(argv) {
 
 const cfg = parseArgs(process.argv.slice(2));
 const WINDOW_MS = cfg.windowHours * 3600_000;
+
+// ---------- single instance: running `agenq` again restarts it ----------
+
+// The port holder is identified via /proc/net/tcp socket inodes; only a
+// process whose command line is AgenQ itself is ever a restart target.
+function isMonitorCmdline(cmd) {
+  return cmd.split("\0").some(
+    (a) => a === "agenq" || a.endsWith("/agenq") || a === "monitor.mjs" || a.endsWith("/monitor.mjs"),
+  );
+}
+
+function listenerPidOnPort(port) {
+  const inodes = new Set();
+  const hexPort = port.toString(16).padStart(4, "0").toUpperCase();
+  for (const f of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    let text;
+    try {
+      text = readFileSync(f, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split("\n").slice(1)) {
+      const cols = line.trim().split(/\s+/);
+      // sl local_address rem_address st … inode
+      if (cols.length < 10 || cols[3] !== "0A" /* LISTEN */) continue;
+      if (cols[1]?.split(":")[1] !== hexPort) continue;
+      inodes.add(cols[9]);
+    }
+  }
+  if (!inodes.size) return null;
+  for (const e of readdirSync("/proc")) {
+    if (!/^\d+$/.test(e)) continue;
+    let fds;
+    try {
+      fds = readdirSync(`/proc/${e}/fd`);
+    } catch {
+      continue;
+    }
+    for (const fd of fds) {
+      let tgt;
+      try {
+        tgt = readlinkSync(`/proc/${e}/fd/${fd}`);
+      } catch {
+        continue;
+      }
+      const m = tgt.match(/^socket:\[(\d+)\]$/);
+      if (!m || !inodes.has(m[1])) continue;
+      try {
+        if (!isMonitorCmdline(readFileSync(`/proc/${e}/cmdline`, "utf8"))) return null;
+      } catch {
+        return null;
+      }
+      return Number(e); // a real AgenQ holds the port
+    }
+  }
+  return null; // port held by something that isn't AgenQ
+}
+
+function killAndWait(pid) {
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {}
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    try {
+      readFileSync(`/proc/${pid}/stat`);
+    } catch {
+      return; // gone
+    }
+    Bun.sleepSync(50);
+  }
+  console.log(`  pid ${pid} ignored SIGTERM — sending SIGKILL`);
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {}
+}
 // directories inside a .zcode state dir (global or project-local) are not
 // project dirs — subagent session rows point there; children inherit their
 // manager's directory instead
@@ -94,6 +170,14 @@ function gatherDb() {
       WHERE error_type IS NOT NULL
       ORDER BY completed_at`);
 
+    // a session is only failed if its most recent outcome is an error —
+    // a successful request after the last error means it recovered
+    const lastok = run("lastok", `
+      SELECT session_id, MAX(completed_at) AS last_ok
+      FROM model_usage
+      WHERE status IN ('completed', 'cancelled')
+      GROUP BY session_id`);
+
     const todos = run("todos", `
       SELECT session_id, content, status, position
       FROM todo ORDER BY session_id, position`);
@@ -108,7 +192,7 @@ function gatherDb() {
     } catch {
       // older CLI builds may lack columns; titles are decorative
     }
-    return { usage, spark, errors, todos, tools, titles };
+    return { usage, spark, errors, lastok, todos, tools, titles };
   } finally {
     db.close();
   }
@@ -163,7 +247,7 @@ async function gatherAgentLinks() {
 const SPARK_TAIL = 120; // sparkline points per agent
 const ACTIVE_MS = 5 * 60_000; // heartbeat within this = active; idle past it = sleep
 
-async function assemble({ usage, spark, errors, todos, tools, titles, links, liveProcs, now }) {
+async function assemble({ usage, spark, errors, lastok, todos, tools, titles, links, liveProcs, now }) {
   const cutoff = now - WINDOW_MS;
 
   const sessions = new Map();
@@ -276,7 +360,12 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, liv
   // agents-dir metadata still says "running".
   // Liveness from /proc overrides the DB's view of the past: a session whose
   // zcode-cli process is gone has exited, whatever the DB still claims.
+  const lastOkBySession = new Map(lastok.map((r) => [r.session_id, r.last_ok]));
   for (const s of sessions.values()) {
+    // an error older than the last successful request isn't a failure —
+    // the session recovered
+    const lastOk = lastOkBySession.get(s.id);
+    if (s.lastError && lastOk != null && (s.lastError.at ?? 0) <= lastOk) s.lastError = null;
     s.live = s.directory == null ? null : liveProcs.has(s.directory);
     if (s.lastError) s.status = "failed";
     else if (s.linkStatus === "completed") s.status = "done";
@@ -316,7 +405,7 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, liv
   // global ticker: most recent tool calls across kept sessions
   const ticker = tools
     .filter((t) => keep.has(t.session_id))
-    .slice(0, 30)
+    .slice(0, 15)
     .map((t) => ({
       sessionId: t.session_id,
       tool: t.tool_name,
@@ -347,10 +436,10 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, liv
 }
 
 async function snapshot() {
-  const { usage, spark, errors, todos, tools, titles } = gatherDb();
+  const { usage, spark, errors, lastok, todos, tools, titles } = gatherDb();
   const links = await gatherAgentLinks();
   const liveProcs = gatherLiveProcs();
-  return assemble({ usage, spark, errors, todos, tools, titles, links, liveProcs, now: Date.now() });
+  return assemble({ usage, spark, errors, lastok, todos, tools, titles, links, liveProcs, now: Date.now() });
 }
 
 // ---------- stop action (the one deliberate write) ----------
@@ -438,7 +527,8 @@ const CONTENT_TYPES = {
 let lastGood = null;
 let lastError = null;
 
-Bun.serve({
+function startServer() {
+  return Bun.serve({
   port: cfg.port,
   // the stop action makes this no longer harmless to expose — loopback only
   hostname: "127.0.0.1",
@@ -475,7 +565,28 @@ Bun.serve({
     }
     return new Response("not found", { status: 404 });
   },
-});
+  });
+}
+
+try {
+  startServer();
+} catch (e) {
+  if (!String(e?.code ?? e?.message).includes("EADDRINUSE")) throw e;
+  const pid = listenerPidOnPort(cfg.port);
+  if (!pid) {
+    console.error(`port ${cfg.port} is already in use — and not by a restartable AgenQ instance.`);
+    console.error(`  find it: ss -ltnp | grep ${cfg.port}   or pick another: agenq --port ${cfg.port + 1}`);
+    process.exit(1);
+  }
+  console.log(`restarting AgenQ (stopping pid ${pid}) …`);
+  killAndWait(pid);
+  try {
+    startServer();
+  } catch {
+    console.error(`port ${cfg.port} still unavailable after stopping pid ${pid}.`);
+    process.exit(1);
+  }
+}
 
 console.log(`AgenQ monitor → http://localhost:${cfg.port}`);
 console.log(`  db:        ${cfg.db}`);
