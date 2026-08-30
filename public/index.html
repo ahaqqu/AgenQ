@@ -39,8 +39,29 @@
   }
   .alert.show { display: block; }
   @keyframes blink { 50% { border-color: transparent; } }
-  .alert .entry { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
-  .alert .entry:hover { color: #fff; }
+  .alert .ah { font-size: 11px; letter-spacing: 1px; color: #ffb3ae; margin-bottom: 8px; }
+  .agroup { margin-bottom: 10px; }
+  .agroup:last-child { margin-bottom: 0; }
+  .agroup-head { font-weight: 700; color: #ffb3ae; margin: 4px 0 3px; }
+  .aentry { display: flex; align-items: baseline; gap: 10px; padding: 2px 0 2px 14px; font-size: 12px; }
+  .aentry .entry { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .aentry .entry:hover { color: #fff; }
+  .aentry .etype { color: #ffb3ae; }
+  .aentry .ewhen { color: var(--dim); font-size: 11px; }
+  .stopbtn {
+    margin-left: auto; background: transparent; color: #ffb3ae;
+    border: 1px solid var(--fail); border-radius: 6px; font: inherit; font-size: 10px;
+    padding: 1px 8px; cursor: pointer; flex: none;
+  }
+  .stopbtn:hover { background: color-mix(in srgb, var(--fail) 25%, transparent); color: #fff; }
+  .stoppedmark { color: var(--ok); font-size: 11px; margin-top: 6px; }
+  #toast {
+    position: fixed; right: 18px; bottom: 18px; z-index: 10; display: none;
+    max-width: 60ch; padding: 10px 14px; border-radius: 8px; font-size: 12px;
+    border: 1px solid var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--panel)); color: var(--text);
+  }
+  #toast.show { display: block; }
+  #toast.err { border-color: var(--fail); background: color-mix(in srgb, var(--fail) 12%, var(--panel)); }
   .proj { color: var(--accent); font-weight: 700; }
   .root.flash { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
   .tree { display: flex; flex-direction: column; gap: 14px; }
@@ -108,6 +129,7 @@
 </header>
 <main>
   <div class="alert" id="alert">⚠ rate-limited / failed agent detected</div>
+  <div id="toast"></div>
   <div class="errbar" id="errbar"></div>
   <div class="activewrap" id="activewrap">
     <div class="thead">ACTIVE NOW — activity in the last 5m · idle longer = sleep</div>

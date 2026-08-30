@@ -17,7 +17,9 @@ bun start                 # → http://localhost:8787
 bun run start:wide        # show the last 48h instead of 12h
 ```
 
-Requires [Bun](https://bun.sh) ≥ 1.1 and a machine where ZCode has been used (it reads ZCode's local telemetry). No dependencies, no build step, no writes — the DB is opened `mode=ro` per poll and the agents dir is only ever read.
+Requires [Bun](https://bun.sh) ≥ 1.1 and a machine where ZCode has been used (it reads ZCode's local telemetry). No dependencies, no build step, no DB writes — the DB is opened `mode=ro` per poll and the agents dir is only ever read.
+
+**The one exception:** the FAILED panel has a ⏹ *stop* action. It sends `SIGTERM` to the live `zcode-cli` process whose working directory matches the stuck session's project — for killing a retry loop that keeps banging into a weekly rate limit. It asks for confirmation first, matches only on process name + working directory, and the server binds `127.0.0.1` so it is unreachable from the network.
 
 Flags:
 

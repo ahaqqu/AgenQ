@@ -12,10 +12,14 @@
  *                   [--agents-dir ~/.zcode/cli/agents]
  *
  * Read-only by construction: the DB is opened per poll with mode=ro, and the
- * agents directory is only ever listed and read. Nothing here writes.
+ * agents directory is only ever listed and read. The single deliberate
+ * exception is POST /api/stop — an explicit, user-clicked "stop retrying"
+ * that SIGTERMs the zcode-cli process whose cwd matches the session's
+ * project directory. The server binds 127.0.0.1 only.
  */
 import { Database } from "bun:sqlite";
 import { readdir, readFile } from "node:fs/promises";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -41,6 +45,11 @@ function parseArgs(argv) {
 
 const cfg = parseArgs(process.argv.slice(2));
 const WINDOW_MS = cfg.windowHours * 3600_000;
+// directories inside a .zcode state dir (global or project-local) are not
+// project dirs — subagent session rows point there; children inherit their
+// manager's directory instead
+const toProjectDir = (dir) =>
+  dir && !dir.includes("/.zcode/") && !dir.endsWith("/.zcode") ? dir : null;
 
 // ---------- db helpers ----------
 
@@ -160,13 +169,17 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
 
   // project = last path segment of the session's working directory
   const titleById = new Map(
-    titles.map((t) => [
-      t.id,
-      {
-        ...t,
-        project: t.directory ? (t.directory.split("/").filter(Boolean).pop() ?? null) : null,
-      },
-    ]),
+    titles.map((t) => {
+      const directory = toProjectDir(t.directory);
+      return [
+        t.id,
+        {
+          ...t,
+          directory,
+          project: directory ? (directory.split("/").filter(Boolean).pop() ?? null) : null,
+        },
+      ];
+    }),
   );
   const ensure = (id) => {
     if (!sessions.has(id)) {
@@ -176,6 +189,7 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
         title: t?.title ?? null,
         parentId: t?.parent_id ?? null,
         project: t?.project ?? null,
+        directory: t?.directory ?? null,
         role: null,
         model: null,
         status: "idle",
@@ -247,6 +261,7 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
     child.role = l.role;
     child.model = l.model;
     child.project = child.project ?? titleById.get(l.parentSessionId)?.project ?? null;
+    child.directory = child.directory ?? titleById.get(l.parentSessionId)?.directory ?? null;
     child.linkStatus = l.status;
     child.description = l.description;
     if (l.error && !child.lastError) child.lastError = { type: "agent_failed", message: l.error, at: l.completedAt };
@@ -331,6 +346,53 @@ async function snapshot() {
   return assemble({ usage, spark, errors, todos, tools, titles, links, now: Date.now() });
 }
 
+// ---------- stop action (the one deliberate write) ----------
+
+// Live CLI sessions show up as `zcode-cli` processes whose cwd is the
+// session's project directory (verified on this machine). Matching on
+// comm + cwd only — nothing else is ever a kill candidate.
+function findSessionPids(directory) {
+  const pids = [];
+  for (const e of readdirSync("/proc")) {
+    if (!/^\d+$/.test(e)) continue;
+    try {
+      if (readFileSync(`/proc/${e}/comm`, "utf8").trim() !== "zcode-cli") continue;
+      if (readlinkSync(`/proc/${e}/cwd`) === directory) pids.push(Number(e));
+    } catch {
+      // process vanished or not ours — skip
+    }
+  }
+  return pids;
+}
+
+async function handleStop(req) {
+  const body = await req.json().catch(() => null);
+  const s = body?.sessionId && lastGood?.sessions.find((x) => x.id === body.sessionId);
+  if (!s?.directory) {
+    return Response.json({ error: "unknown session (or snapshot empty) — no directory to match" }, { status: 400 });
+  }
+  let pids;
+  try {
+    pids = findSessionPids(s.directory);
+  } catch (e) {
+    return Response.json({ error: "proc scan failed: " + e.message, killed: [] }, { status: 500 });
+  }
+  if (!pids.length) {
+    return Response.json({ error: `no live zcode-cli process in ${s.directory} — run already exited`, killed: [] }, { status: 404 });
+  }
+  const killed = [];
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+      killed.push(pid);
+    } catch (e) {
+      console.error(`SIGTERM ${pid} failed:`, e.message);
+    }
+  }
+  console.log(`stop: SIGTERM ${killed.join(", ")} (${s.directory}) for session ${s.id}`);
+  return Response.json({ killed, directory: s.directory, label: s.project ?? s.id });
+}
+
 // ---------- server ----------
 
 const CONTENT_TYPES = {
@@ -345,8 +407,17 @@ let lastError = null;
 
 Bun.serve({
   port: cfg.port,
+  // the stop action makes this no longer harmless to expose — loopback only
+  hostname: "127.0.0.1",
   async fetch(req) {
     const url = new URL(req.url);
+    if (url.pathname === "/api/stop" && req.method === "POST") {
+      try {
+        return await handleStop(req);
+      } catch (e) {
+        return Response.json({ error: String(e?.message ?? e), killed: [] }, { status: 500 });
+      }
+    }
     if (url.pathname === "/api/state") {
       try {
         lastGood = await snapshot();

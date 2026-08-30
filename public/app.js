@@ -28,6 +28,16 @@ function ago(ts) {
   if (s < 5400) return Math.round(s / 60) + "m ago";
   return Math.round(s / 3600) + "h ago";
 }
+function agoLong(ts) {
+  if (!ts) return "—";
+  const m = Math.floor(Math.max(0, Date.now() - ts) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return m + " minute" + (m === 1 ? "" : "s") + " ago";
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + " hour" + (h === 1 ? "" : "s") + " ago";
+  const d = Math.floor(h / 24);
+  return d + " day" + (d === 1 ? "" : "s") + " ago";
+}
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -98,6 +108,8 @@ function agentCard(s) {
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
     ${todoHtml ? `<ul class="todos">${todoHtml}</ul>` : ""}
     ${s.lastError ? `<div class="err">⚠ ${esc(s.lastError.type)}: ${esc(s.lastError.message ?? "")}</div>` : ""}
+    ${s.lastError && s.directory && !stoppedIds.has(s.id) ? `<button class="stopbtn" data-sid="${esc(s.id)}" data-name="${esc(name)}" title="SIGTERM the zcode-cli process in ${esc(s.directory)}">⏹ stop retrying</button>` : ""}
+    ${stoppedIds.has(s.id) ? `<div class="stoppedmark">⏹ stopped by you — retry loop killed</div>` : ""}
   </div>`;
 }
 
@@ -120,9 +132,52 @@ function currentActivity(s) {
 let filterProject = "all";
 let flashId = null; // banner click → highlight this card until flashUntil
 let flashUntil = 0;
+const stoppedIds = new Set(); // sessions the user stopped this page-load
+
+async function stopSession(sid, name) {
+  const ok = confirm(
+    `Stop "${name}"?\n\nThis sends SIGTERM to the zcode CLI process working in this session's project directory. The retry loop dies with it.`,
+  );
+  if (!ok) return;
+  try {
+    const res = await fetch("/api/stop", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: sid }),
+    });
+    const out = await res.json();
+    if (out.killed?.length) {
+      stoppedIds.add(sid);
+      toast(`stopped ${out.label}: SIGTERM → pid ${out.killed.join(", ")}`);
+      poll();
+    } else {
+      toast("could not stop: " + (out.error ?? res.status), true);
+    }
+  } catch (e) {
+    toast("could not stop: " + e.message, true);
+  }
+}
+
+let toastTimer = null;
+function toast(msg, isErr = false) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.toggle("err", isErr);
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 5000);
+}
+
+function onStopClick(e) {
+  const btn = e.target.closest(".stopbtn");
+  if (!btn) return false;
+  stopSession(btn.dataset.sid, btn.dataset.name);
+  return true;
+}
 
 // failure banner → jump to the card below and flash it
 $("alert").addEventListener("click", (e) => {
+  if (onStopClick(e)) return;
   const entry = e.target.closest(".entry");
   if (!entry) return;
   flashId = entry.dataset.target;
@@ -140,6 +195,9 @@ $("filter").addEventListener("change", () => {
   filterProject = $("filter").value;
   poll();
 });
+
+// stop buttons on agent cards
+$("tree").addEventListener("click", onStopClick);
 
 function render(state) {
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
@@ -160,19 +218,36 @@ function render(state) {
     `Σ in <b>${fmt(state.totals.inputTokens)}</b> · out <b>${fmt(state.totals.outputTokens)}</b> · ` +
     `requests <b>${fmt(state.totals.requests)}</b> · agents <b>${state.sessions.length}</b> · window ${state.windowHours}h`;
 
-  // rate-limit / failure banner — same names as the cards, click to jump.
+  // failures grouped by project, newest group and entry first.
   // Only rewrite on change: constant innerHTML swaps eat clicks mid-flight.
   const failed = state.sessions.filter((s) => s.status === "failed");
+  const groups = new Map();
+  for (const s of [...failed].sort(byLast)) {
+    const p = s.project ?? "unknown project";
+    if (!groups.has(p)) groups.set(p, []);
+    groups.get(p).push(s);
+  }
+  const ordered = [...groups.entries()].sort(
+    (a, b) => (b[1][0].lastAt ?? 0) - (a[1][0].lastAt ?? 0),
+  );
   $("alert").classList.toggle("show", failed.length > 0);
-  const alertHtml = failed.length
-    ? "⚠ " + failed.map((s) =>
-        `<span class="entry" data-target="${esc(s.id)}">${esc(sessionLabel(s))} · ${esc(s.lastError?.type ?? "failed")}</span>`,
-      ).join(" · ")
-    : "";
+  const alertHtml =
+    `<div class="ah">FAILED — click to jump · ⏹ to stop retrying</div>` +
+    ordered.map(([proj, list]) => `
+      <div class="agroup">
+        <div class="agroup-head">${esc(proj)}</div>
+        ${list.map((s) => `
+          <div class="aentry">
+            <span class="entry" data-target="${esc(s.id)}">${esc(sessionLabel(s))}</span>
+            <span class="etype">${esc(s.lastError?.type ?? "failed")}</span>
+            <span class="ewhen">${agoLong(s.lastAt)}</span>
+            ${s.directory ? `<button class="stopbtn" data-sid="${esc(s.id)}" data-name="${esc(sessionLabel(s))}" title="SIGTERM the zcode-cli process in ${esc(s.directory)}">⏹ stop</button>` : ""}
+          </div>`).join("")}
+      </div>`).join("");
   if ($("alert").innerHTML !== alertHtml) $("alert").innerHTML = alertHtml;
 
   // active-now strip — only sessions with a heartbeat in the last 5m
-  const actives = state.sessions.filter((s) => s.status === "running" && matches(s)).sort(byLast);
+  const actives = state.sessions.filter((s) => s.status === "running" && matches(s) && !stoppedIds.has(s.id)).sort(byLast);
   $("activewrap").style.display = actives.length ? "block" : "none";
   $("activebar").innerHTML = actives.map((s) => {
     const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";
