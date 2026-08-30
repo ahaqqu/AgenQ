@@ -147,9 +147,9 @@ const stoppedDirs = new Set(); // projects the user stopped this page-load
 // the same run, and all of them die together
 async function stopProject(directory, project, procCount) {
   const ok = confirm(
-    `Stop the run in "${project}"?\n\n` +
-    `This SIGTERMs ALL ${procCount} live zcode-cli process${procCount === 1 ? "" : "es"} in\n${directory}\n` +
-    `— every session in this project dies with it, not just the failed one.`,
+    `Kill ${procCount} live zcode-cli process${procCount === 1 ? "" : "es"} in "${project}"?\n\n` +
+    `This stops the whole project run — every session in\n${directory}\n` +
+    `dies with it, not just the failed one.`,
   );
   if (!ok) return;
   try {
@@ -188,20 +188,30 @@ function onStopClick(e) {
   return true;
 }
 
-// failure banner → jump to the card below and flash it
-$("alert").addEventListener("click", (e) => {
-  if (onStopClick(e)) return;
-  const entry = e.target.closest(".entry");
-  if (!entry) return;
-  flashId = entry.dataset.target;
+// click a failed task or a ticker row → jump to the card below and flash it
+function jumpToCard(id) {
+  if (!id) return;
+  flashId = id;
   flashUntil = Date.now() + 1800;
-  const el = document.getElementById("root-" + flashId)
-    ?? document.getElementById("kid-" + flashId);
+  const el = document.getElementById("root-" + id)
+    ?? document.getElementById("kid-" + id);
   if (!el) return;
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.remove("flash");
   void el.offsetWidth;
   el.classList.add("flash");
+}
+
+$("alert").addEventListener("click", (e) => {
+  if (onStopClick(e)) return;
+  const entry = e.target.closest(".entry");
+  if (!entry) return;
+  jumpToCard(entry.dataset.target);
+});
+
+$("ticker").addEventListener("click", (e) => {
+  const li = e.target.closest("li[data-target]");
+  if (li) jumpToCard(li.dataset.target);
 });
 
 $("filter").addEventListener("change", () => {
@@ -234,7 +244,7 @@ $("legend").innerHTML = `
     <div class="lrow"><span class="ic">🤖</span> other subagent role</div>
     <div class="lrow"><span class="ic">💤</span> idle 5m+ but process still alive</div>
     <div class="lrow"><span class="ic">⚠</span> last error of that agent</div>
-    <div class="lrow"><span class="ic">⏹</span> stop run — SIGTERMs every CLI process of that project (all sessions in it die)</div>
+    <div class="lrow"><span class="ic">⏹</span> kill process — SIGTERMs every CLI process of that project (the whole project run stops)</div>
   </div>`;
 
 function render(state) {
@@ -276,7 +286,7 @@ function render(state) {
   $("alert").classList.toggle("show", failed.length > 0);
   $("alert").classList.toggle("livefail", failed.some((s) => s.live));
   const alertHtml =
-    `<div class="ah">FAILED — click a task to jump · ⏹ stops the whole project run</div>` +
+    `<div class="ah">FAILED</div>` +
     ordered.map(([dir, list]) => {
       const procs = state.liveProcs?.[dir] ?? 0;
       const proj = list[0].project ?? "unknown project";
@@ -285,7 +295,7 @@ function render(state) {
       <div class="agroup">
         <div class="agroup-head">
           <span>${esc(proj)}</span>
-          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" title="SIGTERM all ${procs} zcode-cli process(es) in ${esc(dir)}">⏹ stop run (${procs} live)</button>`
+          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" title="SIGTERM all ${procs} zcode-cli process(es) in ${esc(dir)}">⏹ kill process</button>`
             : stoppedDirs.has(dir) ? `<span class="stoppedmark">⏹ stopped by you</span>` : ""}
         </div>
         ${list.map((s) => `
@@ -359,7 +369,7 @@ function render(state) {
   $("ticker").innerHTML = state.ticker.map((t) => {
     const isNew = !known.has(t.at + t.tool) && prevTicker.length > 0;
     const agent = byId.get(t.sessionId);
-    return `<li class="${isNew ? "new" : ""}"><span>${ago(t.at)}</span><span class="t">${agent ? labelHtml(agent) : "session"}</span><span>${esc(t.tool)}</span><span>${t.status ?? ""} ${t.outputBytes != null ? "· " + fmt(t.outputBytes) + "B" : ""}</span></li>`;
+    return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="click to jump to the session card"><span>${ago(t.at)}</span><span class="t">${agent ? labelHtml(agent) : "session"}</span><span>${esc(t.tool)}</span><span>${t.status ?? ""} ${t.outputBytes != null ? "· " + fmt(t.outputBytes) + "B" : ""}</span></li>`;
   }).join("");
 
   prev = state;
