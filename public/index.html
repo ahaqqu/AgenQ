@@ -28,7 +28,21 @@
     margin-left: auto; background: var(--panel2); color: var(--text);
     border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 6px;
   }
+  #legendbtn {
+    background: var(--panel2); color: var(--dim); border: 1px solid var(--line);
+    border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 8px; cursor: pointer;
+  }
+  #legendbtn:hover { color: var(--text); }
   #poll { font-size: 11px; color: var(--dim); }
+  .legend {
+    display: none; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel); padding: 12px 16px; gap: 12px 32px; grid-template-columns: 1fr 1fr; font-size: 12px;
+  }
+  .legend.show { display: grid; }
+  .legend .lhead { color: var(--dim); font-size: 11px; letter-spacing: 1px; margin: 4px 0 6px; }
+  .legend .lrow { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  .legend .lrow .status { flex: none; }
+  .legend .lrow .ic { flex: none; width: 16px; text-align: center; }
   #poll .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 5px; }
   #poll.stale .dot { background: var(--fail); }
   main { padding: 18px 20px 40px; }
@@ -128,10 +142,12 @@
 <header>
   <h1>Agen<span>Q</span> — mission control</h1>
   <div class="totals" id="totals"></div>
+  <button id="legendbtn" title="what the dots and icons mean">? legend</button>
   <select id="filter" title="filter by project"></select>
   <div id="poll"><span class="dot"></span><span id="poll-text">connecting…</span></div>
 </header>
-<main>
+  <main>
+  <div class="legend" id="legend"></div>
   <div class="alert" id="alert">⚠ rate-limited / failed agent detected</div>
   <div id="toast"></div>
   <div class="errbar" id="errbar"></div>

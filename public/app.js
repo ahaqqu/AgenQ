@@ -123,6 +123,14 @@ function sessionLabel(s) {
   return s.project && !s.title ? s.project + " · " + s.id.slice(0, 12) : name;
 }
 
+// same, with the project in blue like the panel titles
+function labelHtml(s) {
+  const name = s.role ?? s.title ?? s.id.slice(0, 12);
+  return s.project
+    ? `<span class="proj">${esc(s.project)}</span> · ${esc(name)}`
+    : esc(name);
+}
+
 function currentActivity(s) {
   const todo = (s.todos ?? []).find((t) => t.status === "in_progress");
   if (todo) return todo.content;
@@ -201,6 +209,27 @@ $("filter").addEventListener("change", () => {
   poll();
 });
 
+// legend — built from the same constants the board uses, so it can't drift
+$("legendbtn").addEventListener("click", () => $("legend").classList.toggle("show"));
+$("legend").innerHTML = `
+  <div class="lgroup">
+    <div class="lhead">STATUS DOTS</div>
+    <div class="lrow"><span class="status running"></span> running — model requests in the last 5m, CLI process alive</div>
+    <div class="lrow"><span class="status sleep"></span> sleep — process alive but idle 5m+ (card time shows 💤)</div>
+    <div class="lrow"><span class="status done"></span> done — subagent finished cleanly</div>
+    <div class="lrow"><span class="status failed"></span> failed — last request errored / agent crashed; pulsing means the retry loop is still alive</div>
+    <div class="lrow"><span class="status exited"></span> exited — no live CLI process for this project anymore; the run is over</div>
+  </div>
+  <div class="lgroup">
+    <div class="lhead">ICONS</div>
+    <div class="lrow"><span class="ic">🧑‍✈️</span> main session (the manager you talked to)</div>
+    ${Object.entries(ROLE_EMOJI).map(([r, e]) => `<div class="lrow"><span class="ic">${e}</span> ${esc(r)}</div>`).join("")}
+    <div class="lrow"><span class="ic">🤖</span> other subagent role</div>
+    <div class="lrow"><span class="ic">💤</span> idle 5m+ but process still alive</div>
+    <div class="lrow"><span class="ic">⚠</span> last error of that agent</div>
+    <div class="lrow"><span class="ic">⏹</span> stop run — SIGTERMs every CLI process of that project (all sessions in it die)</div>
+  </div>`;
+
 function render(state) {
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
 
@@ -250,7 +279,7 @@ function render(state) {
         </div>
         ${list.map((s) => `
           <div class="aentry ${s.live ? "" : "exited"}">
-            <span class="entry" data-target="${esc(s.id)}">${esc(sessionLabel(s))}</span>
+            <span class="entry" data-target="${esc(s.id)}">${labelHtml(s)}</span>
             <span class="etype">${esc(s.lastError?.type ?? "failed")}</span>
             <span class="ewhen">${agoLong(s.lastAt)}</span>
             ${stoppedDirs.has(dir) ? `<span class="exitedchip">stopped</span>` : s.live ? `<span class="livechip">retrying</span>` : `<span class="exitedchip">run exited</span>`}
@@ -266,7 +295,7 @@ function render(state) {
     const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";
     const doing = currentActivity(s);
     return `<div class="chip"><span class="status running"></span><span>${emoji}</span>` +
-      `<span class="t">${esc(s.role ?? s.title ?? "session")}</span>` +
+      `<span class="t">${labelHtml(s)}</span>` +
       `<span class="d" title="${esc(doing)}">${esc(doing)}</span>` +
       `<span class="ago">${ago(s.lastAt)}</span></div>`;
   }).join("");
@@ -317,7 +346,7 @@ function render(state) {
   $("ticker").innerHTML = state.ticker.map((t) => {
     const isNew = !known.has(t.at + t.tool) && prevTicker.length > 0;
     const agent = byId.get(t.sessionId);
-    return `<li class="${isNew ? "new" : ""}"><span>${ago(t.at)}</span><span class="t">${esc(agent ? sessionLabel(agent) : "session")}</span><span>${esc(t.tool)}</span><span>${t.status ?? ""} ${t.outputBytes != null ? "· " + fmt(t.outputBytes) + "B" : ""}</span></li>`;
+    return `<li class="${isNew ? "new" : ""}"><span>${ago(t.at)}</span><span class="t">${agent ? labelHtml(agent) : "session"}</span><span>${esc(t.tool)}</span><span>${t.status ?? ""} ${t.outputBytes != null ? "· " + fmt(t.outputBytes) + "B" : ""}</span></li>`;
   }).join("");
 
   prev = state;
