@@ -18,21 +18,36 @@ AgenQ reads (read-only) the telemetry ZCode already writes on disk and turns it 
 
 ## Run it
 
+**Linux — the easy way:** run `install.sh` once. It installs [Bun](https://bun.sh) if it's missing, puts the `agenq` command in `~/.local/bin`, and starts the monitor:
+
 ```bash
 git clone https://github.com/ahaqqu/AgenQ && cd AgenQ
-bun link            # one-time — installs the `agenq` command (expects ~/.bun/bin on PATH)
+./install.sh            # → open http://localhost:8787 in your browser
+```
+
+Or skip the clone entirely:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ahaqqu/AgenQ/main/install.sh | bash
+```
+
+The installer clones the repo to `~/.local/share/agenq` (re-running it updates that clone), and any flags you pass go straight to the server: `./install.sh --port 8791 --window-hours 48`. Set `AGENQ_SKIP_RUN=1` to install without starting.
+
+Once installed, `agenq` is a normal command:
+
+```bash
 agenq               # → open http://localhost:8787 in your browser
 agenq --port 8791   # different port, `--window-hours 48` etc. work the same
 agenq               # already running? it restarts the instance on that port
 ```
 
-No `bun link`? `bun start` runs the exact same thing without installing. If `agenq` isn't found after linking (e.g. bun managed by mise), symlink it yourself:
+Already have Bun? The manual routes still work: `bun start` runs the same thing without installing anything, and if `agenq` isn't found after `bun link` (e.g. bun managed by mise), symlink it yourself:
 
 ```bash
 ln -s "$(pwd)/monitor.mjs" ~/.local/bin/agenq
 ```
 
-Requires [Bun](https://bun.sh) ≥ 1.1 and a machine where ZCode has been used (it reads ZCode's local telemetry). No dependencies, no build step, no DB writes — the DB is opened `mode=ro` per poll and the agents dir is only ever read.
+Requires Linux, [Bun](https://bun.sh) ≥ 1.1 (the installer handles this — `curl` and `git` are the only prerequisites), and a machine where ZCode has been used (it reads ZCode's local telemetry). No dependencies, no build step, no DB writes — the DB is opened `mode=ro` per poll and the agents dir is only ever read.
 
 **The one exception:** the FAILED panel has a ⏹ *stop run* action, **at project level** — that is the real granularity of the mechanism, so it is the granularity of the button. ZCode runs each project's CLI session as `zcode-cli` processes working in the project directory; stop SIGTERMs all of them (the button and the confirm dialog say how many). Liveness comes from `/proc`, not the DB: a failure whose process is gone is shown dimmed as *run exited*, with no button. Stop asks for confirmation first, and the server binds `127.0.0.1` so it is unreachable from the network.
 

@@ -135,11 +135,18 @@ const toProjectDir = (dir) =>
 
 function roDb() {
   // Fresh read-only connection per poll: long-lived WAL readers get
-  // invalidated by checkpoints, per-poll connections don't.
-  return new Database(cfg.db, { readonly: true });
+  // invalidated by checkpoints, per-poll connections don't. A DB that
+  // isn't there (ZCode never ran on this machine) returns null and the
+  // board just renders empty instead of crashing the server.
+  try {
+    return new Database(cfg.db, { readonly: true });
+  } catch {
+    return null;
+  }
 }
 
 function rows(db, sql, params = []) {
+  if (!db) return [];
   return db.prepare(sql).all(...params);
 }
 
@@ -202,7 +209,7 @@ function gatherDb() {
     }
     return { usage, spark, errors, lastok, todos, tools, titles };
   } finally {
-    db.close();
+    db?.close();
   }
 }
 
@@ -548,7 +555,7 @@ function sessionDetail(id) {
       todos: todos.map((t) => ({ content: t.content, status: t.status })),
     };
   } finally {
-    db.close();
+    db?.close();
   }
 }
 
@@ -635,7 +642,7 @@ function sessionMessages(id, after) {
       items,
     };
   } finally {
-    db.close();
+    db?.close();
   }
 }
 
