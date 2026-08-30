@@ -151,6 +151,7 @@ async function gatherAgentLinks() {
 // ---------- snapshot assembly ----------
 
 const SPARK_TAIL = 120; // sparkline points per agent
+const ACTIVE_MS = 5 * 60_000; // heartbeat within this = active; idle past it = sleep
 
 async function assemble({ usage, spark, errors, todos, tools, titles, links, now }) {
   const cutoff = now - WINDOW_MS;
@@ -243,12 +244,19 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
     parent.children.push(child.id);
   }
 
-  // status: derive from error + link status + activity recency
+  // status: failed > link state > activity recency. A heartbeat inside
+  // ACTIVE_MS means running; anything quiet longer is asleep, even if the
+  // agents-dir metadata still says "running".
   for (const s of sessions.values()) {
     if (s.lastError) s.status = "failed";
-    else if (s.linkStatus) s.status = s.linkStatus === "completed" ? "done" : s.linkStatus;
-    else if (s.lastAt && now - s.lastAt < 90_000) s.status = "running";
-    else if (s.lastAt) s.status = "done";
+    else if (s.linkStatus === "completed") s.status = "done";
+    else {
+      const last = s.lastAt ?? 0;
+      const awake = last > 0 && now - last <= ACTIVE_MS;
+      if (s.linkStatus) s.status = s.linkStatus === "running" ? (awake ? "running" : "sleep") : s.linkStatus;
+      else if (last) s.status = awake ? "running" : "sleep";
+      else s.status = "idle";
+    }
   }
 
   // keep recent sessions plus any ancestor of a kept session

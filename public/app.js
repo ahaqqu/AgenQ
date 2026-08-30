@@ -91,7 +91,7 @@ function agentCard(s) {
       <span>out <b>${fmt(s.outputTokens)}</b></span>
       <span>reqs <b>${s.requests}</b></span>
       <span>ctx max <b class="${over ? "over" : ""}">${fmt(s.maxContext)}</b></span>
-      <span style="margin-left:auto">${ago(s.lastAt)}</span>
+      <span style="margin-left:auto">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</span>
     </div>
     <canvas class="spark" id="${sparkId}"></canvas>
     <div class="cap">input tokens / request — dashed line = ${fmt(CTX_LIMIT)} context cliff</div>
@@ -152,7 +152,7 @@ function render(state) {
           <span class="status ${esc(root.status)}"></span>
           <span>🧑‍✈️</span>
           <span class="title">${esc(root.title ?? "main session")}</span>
-          <span class="meta">${fmt(root.inputTokens)} in · ${root.requests} reqs · ${ago(root.lastAt)}</span>
+          <span class="meta">${fmt(root.inputTokens)} in · ${root.requests} reqs · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
         <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
       </div>`);
