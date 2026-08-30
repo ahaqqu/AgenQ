@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgenQ — live conversation</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131824; --panel2: #1a2130; --line: #232c3f;
+    --text: #dbe4f0; --dim: #7d8aa0; --accent: #6ea8fe;
+    --ok: #3fb96f; --run: #e8b23f; --fail: #e5534b; --idle: #55607a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; padding: 10px 20px;
+    border-bottom: 1px solid var(--line); background: var(--panel);
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: 1px; white-space: nowrap; }
+  header h1 span { color: var(--accent); }
+  #title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #poll { margin-left: auto; font-size: 11px; color: var(--dim); white-space: nowrap; }
+  #poll .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 5px; }
+  #poll.stale .dot { background: var(--fail); }
+  main { padding: 18px 20px 60px; max-width: 980px; margin: 0 auto; }
+  .msg { margin: 0 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 8px 14px 10px; }
+  .msg .who { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); }
+  .msg.user { border-left: 3px solid var(--accent); }
+  .msg.user .who { color: var(--accent); }
+  .msg .body { white-space: pre-wrap; word-break: break-word; margin-top: 4px; }
+  .msg.assistant { border-left: 3px solid var(--line); }
+  details { margin-top: 4px; }
+  details summary {
+    cursor: pointer; user-select: none; color: var(--dim); font-size: 12px;
+    display: flex; align-items: center; gap: 8px; list-style: none;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "▸"; font-size: 10px; }
+  details[open] summary::before { content: "▾"; }
+  details summary:hover { color: var(--text); }
+  details pre {
+    margin: 6px 0 2px; white-space: pre-wrap; word-break: break-word;
+    font-size: 12px; color: var(--text);
+  }
+  details.think pre { color: var(--dim); font-style: italic; }
+  details.tool { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; background: var(--bg); }
+  details.tool .tname { color: var(--text); font-weight: 700; }
+  .st { font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; }
+  .st.running { color: var(--run); border-color: var(--run); }
+  .st.completed, .st.done { color: var(--ok); border-color: var(--ok); }
+  .st.error, .st.failed, .st.cancelled { color: var(--fail); border-color: var(--fail); }
+  .st.pending { color: var(--dim); }
+  .when { color: var(--dim); font-size: 10px; margin-left: auto; }
+  .pending { color: var(--dim); font-style: italic; padding: 20px 0; text-align: center; }
+  .more { color: var(--dim); font-size: 11px; text-align: center; padding: 10px 0 16px; font-style: italic; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agen<span>Q</span> — live conversation</h1>
+  <div id="title">…</div>
+  <div id="poll"><span class="dot"></span><span id="poll-text">connecting…</span></div>
+</header>
+<main><div id="log"><div class="pending">loading conversation…</div></div></main>
+<script src="conversation.js"></script>
+</body>
+</html>
