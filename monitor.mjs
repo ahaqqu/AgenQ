@@ -5,7 +5,10 @@
  * Reads (read-only) the local ZCode telemetry that already exists on disk:
  *   - ~/.zcode/cli/db/db.sqlite      — per-request token usage, tool calls, todos, session titles
  *   - ~/.zcode/cli/agents/.../agent_x/metadata.json — the manager→subagent links, role profiles, status, errors
- * and serves them as one JSON snapshot plus a static, dependency-free UI.
+ * and serves them as one JSON snapshot (plus a lazy per-session detail
+ * endpoint with tool arguments, thinking excerpts and token breakdowns read
+ * from the `part`/`model_usage` tables only on demand) plus a static,
+ * dependency-free UI.
  *
  *   bun monitor.mjs [--port 8787] [--window-hours 12]
  *                   [--db ~/.zcode/cli/db/db.sqlite]
@@ -442,6 +445,104 @@ async function snapshot() {
   return assemble({ usage, spark, errors, lastok, todos, tools, titles, links, liveProcs, now: Date.now() });
 }
 
+// ---------- per-session detail (lazy — only read when the UI expands a row) ----------
+
+// Context-window estimates for the fill gauge; unmatched models fall back to
+// the same 200k cliff the sparkline uses.
+const MODEL_WINDOWS = [
+  [/glm/i, 200_000],
+  [/kimi/i, 256_000],
+  [/deepseek/i, 128_000],
+];
+const modelWindow = (model) => MODEL_WINDOWS.find(([re]) => re.test(model ?? ""))?.[1] ?? 200_000;
+
+const tail = (s, n) => { s = String(s ?? ""); return s.length > n ? "…" + s.slice(-n) : s; };
+const head = (s, n) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n) + " …" : s; };
+
+function sessionDetail(id) {
+  const db = roDb();
+  try {
+    const q = (sql, params = []) => {
+      try { return rows(db, sql, params); } catch { return []; }
+    };
+    const sess = q(`SELECT title, directory, summary_additions, summary_deletions, summary_files
+                    FROM session WHERE id = ?`, [id])[0] ?? null;
+
+    // the live/latest tool call — part rows carry the arguments it was given
+    let currentTool = null;
+    const tp = q(`SELECT data, time_created FROM part
+                  WHERE session_id = ? AND json_extract(data, '$.type') = 'tool'
+                  ORDER BY time_created DESC LIMIT 1`, [id])[0];
+    if (tp) {
+      try {
+        const d = JSON.parse(tp.data);
+        const input = JSON.stringify(d.state?.input ?? {}) ?? "{}";
+        currentTool = {
+          name: d.tool ?? null,
+          status: d.state?.status ?? null,
+          input: input === "{}" ? null : head(input, 800),
+          at: tp.time_created,
+        };
+      } catch { /* malformed part row — skip */ }
+    }
+
+    // newest thinking excerpt — tail only, the beginning is the stale half
+    let thinking = null;
+    const rp = q(`SELECT data, time_created FROM part
+                  WHERE session_id = ? AND json_extract(data, '$.type') = 'reasoning'
+                  ORDER BY time_created DESC LIMIT 1`, [id])[0];
+    if (rp) {
+      try {
+        const d = JSON.parse(rp.data);
+        if (d.text) thinking = { text: tail(d.text, 600), at: rp.time_created };
+      } catch { /* malformed part row — skip */ }
+    }
+
+    const turns = q(`SELECT model_id, status, started_at, duration_ms, time_to_first_token_ms,
+                            input_tokens, output_tokens, reasoning_tokens,
+                            cache_read_input_tokens, cache_creation_input_tokens,
+                            retry_count, context_exceeded
+                     FROM model_usage WHERE session_id = ? ORDER BY started_at DESC LIMIT 5`, [id]);
+    const sums = q(`SELECT COUNT(*) AS requests, SUM(input_tokens) AS input_tokens,
+                           SUM(output_tokens) AS output_tokens, SUM(reasoning_tokens) AS reasoning_tokens,
+                           SUM(cache_read_input_tokens) AS cache_read,
+                           SUM(cache_creation_input_tokens) AS cache_create,
+                           MAX(input_tokens) AS max_context
+                    FROM model_usage WHERE session_id = ?`, [id])[0] ?? {};
+    const errors = q(`SELECT error_type, error_message, completed_at FROM model_usage
+                      WHERE session_id = ? AND error_type IS NOT NULL
+                      ORDER BY completed_at DESC LIMIT 3`, [id]);
+    const todos = q(`SELECT content, status FROM todo WHERE session_id = ? ORDER BY position`, [id]);
+
+    return {
+      sessionId: id,
+      fetchedAt: Date.now(),
+      title: sess?.title ?? null,
+      directory: sess?.directory ?? null,
+      diff: sess
+        ? { additions: sess.summary_additions, deletions: sess.summary_deletions, files: sess.summary_files }
+        : null,
+      currentTool,
+      thinking,
+      turns,
+      tokens: {
+        requests: sums.requests ?? 0,
+        input: sums.input_tokens ?? 0,
+        output: sums.output_tokens ?? 0,
+        reasoning: sums.reasoning_tokens ?? 0,
+        cacheRead: sums.cache_read ?? 0,
+        cacheCreate: sums.cache_create ?? 0,
+        maxContext: sums.max_context ?? 0,
+      },
+      modelWindow: modelWindow(turns[0]?.model_id),
+      errors: errors.map((e) => ({ type: e.error_type, message: head(e.error_message ?? "", 200), at: e.completed_at })),
+      todos: todos.map((t) => ({ content: t.content, status: t.status })),
+    };
+  } finally {
+    db.close();
+  }
+}
+
 // ---------- stop action (the one deliberate write) ----------
 
 // Live CLI sessions show up as `zcode-cli` processes whose cwd is the
@@ -539,6 +640,14 @@ function startServer() {
         return await handleStop(req);
       } catch (e) {
         return Response.json({ error: String(e?.message ?? e), killed: [] }, { status: 500 });
+      }
+    }
+    const detail = url.pathname.match(/^\/api\/session\/([^/]+)\/detail$/);
+    if (detail && req.method === "GET") {
+      try {
+        return Response.json(sessionDetail(decodeURIComponent(detail[1])));
+      } catch (e) {
+        return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
       }
     }
     if (url.pathname === "/api/state") {
