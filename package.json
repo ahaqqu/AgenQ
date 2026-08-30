@@ -1,0 +1,14 @@
+{
+  "name": "agenq",
+  "version": "0.1.0",
+  "description": "Live mission-control monitor for ZCode main sessions and subagents — token burn, agent tree, todos, tool ticker.",
+  "type": "module",
+  "scripts": {
+    "start": "bun monitor.mjs",
+    "start:wide": "bun monitor.mjs --window-hours 48"
+  },
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.1"
+  }
+}
