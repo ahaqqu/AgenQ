@@ -11,6 +11,8 @@ AgenQ reads (read-only) the telemetry ZCode already writes on disk and turns it 
 - **Live todos** — each agent's todo list, animated as it progresses
 - **Active Now strip** — every session with a heartbeat in the last 5m; click a row to expand it into a live detail panel: the current tool call with its actual arguments, the latest thinking excerpt, todo progress, diff summary, context-window fill, turn timings (duration, time-to-first-token, retries), a full token breakdown (cache read/write, reasoning) and recent errors
 - **Live conversation** — the 💬 button on an Active Now row opens the session's full conversation in a new tab (user prompts, assistant replies, collapsed thinking, tool calls with status), streaming new messages as they happen
+
+![AgenQ live conversation — this README's own editing session, streaming](docs/screenshot-conversation.png)
 - **Tool ticker** — the latest tool calls across visible sessions
 - **Failure alerts** — rate limits and crashed agents turn red the moment they happen; a hollow dot means the process already exited
 
