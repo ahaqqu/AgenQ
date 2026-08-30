@@ -13,7 +13,8 @@ AgenQ reads (read-only) the telemetry ZCode already writes on disk and turns it 
 ## Run it
 
 ```bash
-bun start                 # → http://localhost:8787
+git clone https://github.com/ahaqqu/AgenQ && cd AgenQ
+bun start                 # → open http://localhost:8787 in your browser
 bun run start:wide        # show the last 48h instead of 12h
 ```
 
