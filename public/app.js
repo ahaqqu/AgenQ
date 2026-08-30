@@ -101,6 +101,15 @@ function agentCard(s) {
   </div>`;
 }
 
+const byLast = (a, b) => (b.lastAt ?? b.firstAt ?? 0) - (a.lastAt ?? a.firstAt ?? 0);
+
+function currentActivity(s) {
+  const todo = (s.todos ?? []).find((t) => t.status === "in_progress");
+  if (todo) return todo.content;
+  if (s.lastTool) return s.lastTool.name;
+  return "…";
+}
+
 function render(state) {
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
   $("empty").style.display = state.sessions.length ? "none" : "block";
@@ -116,14 +125,26 @@ function render(state) {
   if (failed.length)
     $("alert").textContent = "⚠ " + failed.map((s) => `${s.role ?? s.id.slice(0, 12)}: ${s.lastError?.type ?? "failed"}`).join(" · ");
 
-  // tree — one card per session, roots first then children inline
+  // active-now strip — only sessions with a heartbeat in the last 90s
+  const actives = state.sessions.filter((s) => s.status === "running").sort(byLast);
+  $("activewrap").style.display = actives.length ? "block" : "none";
+  $("activebar").innerHTML = actives.map((s) => {
+    const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";
+    const doing = currentActivity(s);
+    return `<div class="chip"><span class="status running"></span><span>${emoji}</span>` +
+      `<span class="t">${esc(s.role ?? s.title ?? "session")}</span>` +
+      `<span class="d" title="${esc(doing)}">${esc(doing)}</span>` +
+      `<span class="ago">${ago(s.lastAt)}</span></div>`;
+  }).join("");
+
+  // tree — newest roots first, children newest first
   const seen = new Set();
   const sections = [];
-  for (const rid of state.roots) {
-    const root = byId.get(rid);
+  const rootNodes = state.roots.map((rid) => byId.get(rid)).filter(Boolean).sort(byLast);
+  for (const root of rootNodes) {
     if (!root) continue;
-    seen.add(rid);
-    const kids = (root.children ?? []).map((c) => byId.get(c)).filter(Boolean);
+    seen.add(root.id);
+    const kids = (root.children ?? []).map((c) => byId.get(c)).filter(Boolean).sort(byLast);
     kids.forEach((k) => seen.add(k.id));
     sections.push(`
       <div class="root">
@@ -136,7 +157,7 @@ function render(state) {
         <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
       </div>`);
   }
-  const orphans = state.sessions.filter((s) => !seen.has(s.id));
+  const orphans = state.sessions.filter((s) => !seen.has(s.id)).sort(byLast);
   if (orphans.length)
     sections.push(`<div class="root"><div class="head"><span class="title">other sessions</span></div><div class="kids">${orphans.map(agentCard).join("")}</div></div>`);
   $("tree").innerHTML = sections.join("");

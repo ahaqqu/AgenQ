@@ -76,6 +76,17 @@
   .ticker li.new { animation: slidein .5s ease; }
   @keyframes slidein { from { opacity: 0; transform: translateY(-6px); } }
   .errbar { color: var(--fail); font-size: 12px; padding: 0 20px 10px; }
+  .activewrap { display: none; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  .activewrap .thead { padding: 8px 14px; background: var(--panel2); color: var(--run); font-size: 11px; letter-spacing: 1px; }
+  .activebar { display: grid; gap: 8px; padding: 10px 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .chip {
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+    border: 1px solid var(--line); border-left: 3px solid var(--run); border-radius: 8px;
+    background: var(--bg); padding: 6px 10px; font-size: 12px;
+  }
+  .chip .t { font-weight: 700; white-space: nowrap; }
+  .chip .d { color: var(--dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .ago { color: var(--run); font-size: 10px; white-space: nowrap; }
   .empty { color: var(--dim); padding: 40px; text-align: center; }
 </style>
 </head>
@@ -88,6 +99,10 @@
 <main>
   <div class="alert" id="alert">⚠ rate-limited / failed agent detected</div>
   <div class="errbar" id="errbar"></div>
+  <div class="activewrap" id="activewrap">
+    <div class="thead">ACTIVE NOW — heartbeat in the last 90s</div>
+    <div class="activebar" id="activebar"></div>
+  </div>
   <div class="tree" id="tree"></div>
   <div class="empty" id="empty">no sessions in the window yet — start a ZCode session or a manager run</div>
   <div class="ticker">
