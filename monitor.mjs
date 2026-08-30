@@ -162,7 +162,7 @@ async function gatherAgentLinks() {
 const SPARK_TAIL = 120; // sparkline points per agent
 const ACTIVE_MS = 5 * 60_000; // heartbeat within this = active; idle past it = sleep
 
-async function assemble({ usage, spark, errors, todos, tools, titles, links, now }) {
+async function assemble({ usage, spark, errors, todos, tools, titles, links, liveDirs, now }) {
   const cutoff = now - WINDOW_MS;
 
   const sessions = new Map();
@@ -273,7 +273,10 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
   // status: failed > link state > activity recency. A heartbeat inside
   // ACTIVE_MS means running; anything quiet longer is asleep, even if the
   // agents-dir metadata still says "running".
+  // Liveness from /proc overrides the DB's view of the past: a session whose
+  // zcode-cli process is gone has exited, whatever the DB still claims.
   for (const s of sessions.values()) {
+    s.live = s.directory == null ? null : liveDirs.has(s.directory);
     if (s.lastError) s.status = "failed";
     else if (s.linkStatus === "completed") s.status = "done";
     else {
@@ -283,6 +286,7 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
       else if (last) s.status = awake ? "running" : "sleep";
       else s.status = "idle";
     }
+    if (s.live === false && (s.status === "running" || s.status === "sleep")) s.status = "exited";
   }
 
   // keep recent sessions plus any ancestor of a kept session
@@ -343,7 +347,8 @@ async function assemble({ usage, spark, errors, todos, tools, titles, links, now
 async function snapshot() {
   const { usage, spark, errors, todos, tools, titles } = gatherDb();
   const links = await gatherAgentLinks();
-  return assemble({ usage, spark, errors, todos, tools, titles, links, now: Date.now() });
+  const liveDirs = gatherLiveDirs();
+  return assemble({ usage, spark, errors, todos, tools, titles, links, liveDirs, now: Date.now() });
 }
 
 // ---------- stop action (the one deliberate write) ----------
@@ -351,6 +356,26 @@ async function snapshot() {
 // Live CLI sessions show up as `zcode-cli` processes whose cwd is the
 // session's project directory (verified on this machine). Matching on
 // comm + cwd only — nothing else is ever a kill candidate.
+function gatherLiveDirs() {
+  const dirs = new Set();
+  let entries;
+  try {
+    entries = readdirSync("/proc");
+  } catch {
+    return dirs; // /proc unavailable — no liveness signal, keep DB-derived status
+  }
+  for (const e of entries) {
+    if (!/^\d+$/.test(e)) continue;
+    try {
+      if (readFileSync(`/proc/${e}/comm`, "utf8").trim() !== "zcode-cli") continue;
+      dirs.add(readlinkSync(`/proc/${e}/cwd`));
+    } catch {
+      // process vanished or not ours — skip
+    }
+  }
+  return dirs;
+}
+
 function findSessionPids(directory) {
   const pids = [];
   for (const e of readdirSync("/proc")) {

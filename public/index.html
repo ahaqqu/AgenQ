@@ -35,9 +35,9 @@
   .alert {
     display: none; margin-bottom: 14px; padding: 10px 14px; border: 1px solid var(--fail);
     background: color-mix(in srgb, var(--fail) 12%, var(--panel)); border-radius: 8px; color: #ffb3ae;
-    animation: blink 1.2s ease-in-out infinite;
   }
   .alert.show { display: block; }
+  .alert.livefail { animation: blink 1.2s ease-in-out infinite; }
   @keyframes blink { 50% { border-color: transparent; } }
   .alert .ah { font-size: 11px; letter-spacing: 1px; color: #ffb3ae; margin-bottom: 8px; }
   .agroup { margin-bottom: 10px; }
@@ -86,6 +86,10 @@
   .status.done { background: var(--ok); }
   .status.failed { background: var(--fail); animation: pulse .7s ease-in-out infinite; }
   .status.sleep { background: var(--idle); }
+  .status.exited { background: transparent; border: 2px solid var(--idle); }
+  .aentry.exited { opacity: .55; }
+  .livechip { color: var(--run); font-size: 10px; border: 1px solid var(--run); border-radius: 4px; padding: 0 6px; flex: none; }
+  .exitedchip { color: var(--dim); font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; flex: none; }
   @keyframes pulse { 50% { opacity: .35; transform: scale(.8); } }
   .nums { display: flex; gap: 14px; margin: 8px 0 6px; font-size: 12px; color: var(--dim); }
   .nums b { color: var(--text); }

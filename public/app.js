@@ -85,13 +85,15 @@ function agentCard(s) {
   const name = s.role ?? (s.title ? "main" : "session");
   const over = s.maxContext > CTX_LIMIT;
   const sparkId = "spark-" + s.id;
+  // a dead run's failure keeps its red dot but stops pulsing
+  const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
   const todoHtml = (s.todos ?? []).slice(0, 8).map((t) =>
     `<li class="${esc(t.status)}">${t.status === "done" ? "☑" : t.status === "in_progress" ? "▸" : "☐"} ${esc(t.content)}</li>`
   ).join("");
   return `
   <div class="kid" id="kid-${s.id}">
     <div class="row">
-      <span class="status ${esc(s.status)}"></span>
+      <span class="status ${esc(dot)}" title="${esc(s.status)}${s.live === false ? " · process exited" : ""}"></span>
       <span>${emoji}</span>
       <span class="name">${esc(name)}</span>
       <span class="model">${esc(s.model ?? "")}</span>
@@ -107,8 +109,8 @@ function agentCard(s) {
     <div class="cap">input tokens / request — dashed line = ${fmt(CTX_LIMIT)} context cliff</div>
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
     ${todoHtml ? `<ul class="todos">${todoHtml}</ul>` : ""}
-    ${s.lastError ? `<div class="err">⚠ ${esc(s.lastError.type)}: ${esc(s.lastError.message ?? "")}</div>` : ""}
-    ${s.lastError && s.directory && !stoppedIds.has(s.id) ? `<button class="stopbtn" data-sid="${esc(s.id)}" data-name="${esc(name)}" title="SIGTERM the zcode-cli process in ${esc(s.directory)}">⏹ stop retrying</button>` : ""}
+    ${s.lastError ? `<div class="err">⚠ ${esc(s.lastError.type)}: ${esc(s.lastError.message ?? "")}${s.live === false ? " · run exited" : ""}</div>` : ""}
+    ${s.lastError && s.live && s.directory && !stoppedIds.has(s.id) ? `<button class="stopbtn" data-sid="${esc(s.id)}" data-name="${esc(name)}" title="SIGTERM the zcode-cli process in ${esc(s.directory)}">⏹ stop retrying</button>` : ""}
     ${stoppedIds.has(s.id) ? `<div class="stoppedmark">⏹ stopped by you — retry loop killed</div>` : ""}
   </div>`;
 }
@@ -218,30 +220,34 @@ function render(state) {
     `Σ in <b>${fmt(state.totals.inputTokens)}</b> · out <b>${fmt(state.totals.outputTokens)}</b> · ` +
     `requests <b>${fmt(state.totals.requests)}</b> · agents <b>${state.sessions.length}</b> · window ${state.windowHours}h`;
 
-  // failures grouped by project, newest group and entry first.
+  // failures grouped by project, newest group and entry first; live runs
+  // (their zcode-cli process exists) blink and offer stop, dead runs dim.
   // Only rewrite on change: constant innerHTML swaps eat clicks mid-flight.
   const failed = state.sessions.filter((s) => s.status === "failed");
+  const anyLive = failed.some((s) => s.live);
   const groups = new Map();
-  for (const s of [...failed].sort(byLast)) {
+  for (const s of [...failed].sort((a, b) => (b.live === true) - (a.live === true) || byLast(a, b))) {
     const p = s.project ?? "unknown project";
     if (!groups.has(p)) groups.set(p, []);
     groups.get(p).push(s);
   }
   const ordered = [...groups.entries()].sort(
-    (a, b) => (b[1][0].lastAt ?? 0) - (a[1][0].lastAt ?? 0),
+    (a, b) => (b[1][0].live === true) - (a[1][0].live === true) || (b[1][0].lastAt ?? 0) - (a[1][0].lastAt ?? 0),
   );
   $("alert").classList.toggle("show", failed.length > 0);
+  $("alert").classList.toggle("livefail", anyLive);
   const alertHtml =
-    `<div class="ah">FAILED — click to jump · ⏹ to stop retrying</div>` +
+    `<div class="ah">${anyLive ? "FAILED — live retry loop detected · ⏹ to stop" : "FAILED — no live process (runs already exited)"}</div>` +
     ordered.map(([proj, list]) => `
       <div class="agroup">
         <div class="agroup-head">${esc(proj)}</div>
         ${list.map((s) => `
-          <div class="aentry">
+          <div class="aentry ${s.live ? "" : "exited"}">
             <span class="entry" data-target="${esc(s.id)}">${esc(sessionLabel(s))}</span>
             <span class="etype">${esc(s.lastError?.type ?? "failed")}</span>
             <span class="ewhen">${agoLong(s.lastAt)}</span>
-            ${s.directory ? `<button class="stopbtn" data-sid="${esc(s.id)}" data-name="${esc(sessionLabel(s))}" title="SIGTERM the zcode-cli process in ${esc(s.directory)}">⏹ stop</button>` : ""}
+            ${s.live ? `<span class="livechip">retrying</span>` : `<span class="exitedchip">run exited</span>`}
+            ${s.live && s.directory ? `<button class="stopbtn" data-sid="${esc(s.id)}" data-name="${esc(sessionLabel(s))}" title="SIGTERM the zcode-cli process in ${esc(s.directory)}">⏹ stop</button>` : ""}
           </div>`).join("")}
       </div>`).join("");
   if ($("alert").innerHTML !== alertHtml) $("alert").innerHTML = alertHtml;
@@ -271,7 +277,7 @@ function render(state) {
     sections.push(`
       <div class="root" id="root-${esc(root.id)}">
         <div class="head">
-          <span class="status ${esc(root.status)}"></span>
+          <span class="status ${esc(root.status === "failed" && root.live === false ? "exited" : root.status)}" title="${esc(root.status)}${root.live === false ? " · process exited" : ""}"></span>
           <span>🧑‍✈️</span>
           ${root.project ? `<span class="proj">${esc(root.project)}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
