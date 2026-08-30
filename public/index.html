@@ -149,6 +149,38 @@
   .chip .stats b { color: var(--text); font-weight: 400; }
   .chip .stats b.over { color: var(--fail); font-weight: 700; }
   .chip .ago { color: var(--ok); font-size: 10px; white-space: nowrap; flex: none; }
+  .chip { cursor: pointer; }
+  .chip:hover { border-color: var(--accent); }
+  .chip .exp { color: var(--dim); font-size: 10px; flex: none; width: 10px; }
+  .chip.open { border-color: var(--accent); }
+  .chipdetail {
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 12px; margin-bottom: 2px; font-size: 11.5px;
+  }
+  .chipdetail .dsec { display: flex; gap: 10px; padding: 2px 0; }
+  .chipdetail .dlab {
+    flex: none; width: 62px; color: var(--dim); text-transform: uppercase;
+    letter-spacing: 1px; font-size: 9.5px; padding-top: 2px;
+  }
+  .chipdetail .dval { flex: 1; min-width: 0; }
+  .chipdetail .dval.dim { color: var(--dim); font-style: italic; }
+  .chipdetail pre {
+    margin: 2px 0 0; white-space: pre-wrap; word-break: break-word;
+    font-size: 11px; color: var(--text);
+  }
+  .chipdetail pre.think { color: var(--dim); font-style: italic; }
+  .chipdetail .dim { color: var(--dim); }
+  .chipdetail .add { color: var(--ok); }
+  .chipdetail .del { color: var(--fail); }
+  .chipdetail .errtxt { color: #ffb3ae; }
+  .chipdetail .dload { color: var(--dim); font-style: italic; }
+  .chipdetail .trow { padding: 1px 0; }
+  .chipdetail .bar {
+    display: inline-block; width: 120px; height: 8px; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 4px; overflow: hidden; vertical-align: baseline; margin-right: 6px;
+  }
+  .chipdetail .bar .fill { display: block; height: 100%; background: var(--accent); }
+  .chipdetail .bar .fill.hot { background: var(--fail); }
   .empty { color: var(--dim); padding: 40px; text-align: center; }
 </style>
 </head>
@@ -163,7 +195,7 @@
   <main>
   <div class="legend" id="legend"></div>
   <div class="activewrap" id="activewrap">
-    <div class="thead" id="activetoggle" title="click to collapse">ACTIVE NOW — activity in the last 5m<span class="caret">▾</span></div>
+    <div class="thead" id="activetoggle" title="click to collapse">ACTIVE NOW — activity in the last 5m · click a row to expand<span class="caret">▾</span></div>
     <div class="activebar" id="activebar"></div>
   </div>
   <div class="duo">

@@ -143,6 +143,87 @@ let flashId = null; // banner click → highlight this card until flashUntil
 let flashUntil = 0;
 const stoppedDirs = new Set(); // projects the user stopped this page-load
 
+// ----- expandable ACTIVE NOW rows (lazy per-session detail) -----
+let expandedId = null;
+const detailCache = new Map(); // id -> { data?, error?, fetchedAt }
+let detailInflight = false;
+
+async function fetchDetail(id, force = false) {
+  const c = detailCache.get(id);
+  if (!force && c && Date.now() - c.fetchedAt < 4000) return;
+  if (detailInflight) return;
+  detailInflight = true;
+  try {
+    const res = await fetch(`/api/session/${encodeURIComponent(id)}/detail`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    detailCache.set(id, { data: await res.json(), fetchedAt: Date.now() });
+  } catch (e) {
+    detailCache.set(id, { error: e.message, fetchedAt: Date.now() });
+  } finally {
+    detailInflight = false;
+  }
+  renderDetail(id);
+}
+
+function renderDetail(id) {
+  const el = document.getElementById("detail-" + id);
+  if (!el) return;
+  const sel = document.getSelection();
+  if (sel && !sel.isCollapsed) return; // same copy-protection as render()
+  el.innerHTML = detailHtml(detailCache.get(id));
+}
+
+function detailHtml(entry) {  if (!entry || (!entry.data && !entry.error)) return `<div class="dload">loading…</div>`;
+  if (entry.error) return `<div class="dload errtxt">detail unavailable — ${esc(entry.error)}</div>`;
+  const d = entry.data;
+  const out = [];
+
+  // what it is doing right now, with the actual arguments
+  if (d.currentTool) {
+    out.push(`<div class="dsec"><span class="dlab">now</span><span class="dval">` +
+      `<b>${esc(d.currentTool.name ?? "?")}</b> <span class="dim">(${esc(d.currentTool.status ?? "?")})</span>` +
+      (d.currentTool.input ? `<pre>${esc(d.currentTool.input)}</pre>` : "") + `</span></div>`);
+  } else {
+    out.push(`<div class="dsec"><span class="dlab">now</span><span class="dval dim">no tool call in flight</span></div>`);
+  }
+
+  if (d.thinking?.text)
+    out.push(`<div class="dsec"><span class="dlab">thinking</span><span class="dval"><pre class="think">${esc(d.thinking.text)}</pre></span></div>`);
+
+  const td = d.todos ?? [];
+  if (td.length) {
+    const done = td.filter((t) => t.status === "done").length;
+    const now = td.filter((t) => t.status === "in_progress").map((t) => t.content);
+    out.push(`<div class="dsec"><span class="dlab">todo</span><span class="dval">${done}/${td.length} done` +
+      (now.length ? ` · now: ${esc(now.join(" | "))}` : "") + `</span></div>`);
+  }
+
+  if (d.diff && (d.diff.additions != null || d.diff.files != null))
+    out.push(`<div class="dsec"><span class="dlab">diff</span><span class="dval">` +
+      `<span class="add">+${fmt(d.diff.additions ?? 0)}</span> <span class="del">−${fmt(d.diff.deletions ?? 0)}</span>` +
+      ` · ${d.diff.files ?? "?"} files</span></div>`);
+
+  const tk = d.tokens ?? {};
+  const win = d.modelWindow || 200_000;
+  const fill = tk.maxContext ? Math.round((tk.maxContext / win) * 100) : 0;
+  out.push(`<div class="dsec"><span class="dlab">context</span><span class="dval">` +
+    `<span class="bar"><span class="fill ${fill >= 90 ? "hot" : ""}" style="width:${Math.min(fill, 100)}%"></span></span>` +
+    `${fmt(tk.maxContext ?? 0)} / ${fmt(win)} (${fill}%)</span></div>`);
+
+  out.push(`<div class="dsec"><span class="dlab">tokens</span><span class="dval">` +
+    `<div class="trow">in ${fmt(tk.input ?? 0)} <span class="dim">(cache-read ${fmt(tk.cacheRead ?? 0)}, cache-write ${fmt(tk.cacheCreate ?? 0)})</span>` +
+    ` · out ${fmt(tk.output ?? 0)} <span class="dim">(reasoning ${fmt(tk.reasoning ?? 0)})</span> · ${tk.requests ?? 0} reqs</div>` +
+    (d.turns?.[0] ? `<div class="trow dim">latest turn: in ${fmt(d.turns[0].input_tokens)} / out ${fmt(d.turns[0].output_tokens)} / reasoning ${fmt(d.turns[0].reasoning_tokens)}</div>` : "") +
+    `</span></div>`);
+
+  if (d.errors?.length)
+    out.push(`<div class="dsec"><span class="dlab">errors</span><span class="dval">` +
+      d.errors.map((e) => `<div class="trow del">✗ ${esc(e.type)}: ${esc(e.message ?? "")} <span class="dim">${ago(e.at)}</span></div>`).join("") +
+      `</span></div>`);
+
+  return out.join("");
+}
+
 // stop is a project action: every zcode-cli process in that directory is
 // the same run, and all of them die together
 async function stopProject(directory, project, procCount) {
@@ -227,6 +308,15 @@ $("activetoggle").addEventListener("click", () => {
   const w = $("activewrap");
   w.classList.toggle("collapsed");
   w.querySelector(".caret").textContent = w.classList.contains("collapsed") ? "▸" : "▾";
+});
+// click a chip → expand its detail panel (fetched lazily, refreshed while open)
+$("activebar").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  const id = chip.dataset.session;
+  expandedId = expandedId === id ? null : id;
+  if (expandedId) fetchDetail(expandedId, true);
+  poll();
 });
 $("legend").innerHTML = `
   <div class="lgroup">
@@ -315,12 +405,14 @@ function render(state) {
   $("activebar").innerHTML = actives.map((s) => {
     const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";
     const doing = currentActivity(s);
-    return `<div class="chip"><span class="status running"></span><span>${emoji}</span>` +
+    const open = expandedId === s.id;
+    return `<div class="chip ${open ? "open" : ""}" data-session="${esc(s.id)}"><span class="exp">${open ? "▾" : "▸"}</span><span class="status running"></span><span>${emoji}</span>` +
       `<span class="t" title="${esc(s.title ?? s.role ?? "")}">${labelHtml(s)}</span>` +
       `<span class="d" title="${esc(doing)}">${esc(doing)}</span>` +
       `<span class="stats">in <b>${fmt(s.inputTokens)}</b> · out <b>${fmt(s.outputTokens)}</b> · ${s.requests} reqs · ` +
       `ctx <b class="${s.maxContext > CTX_LIMIT ? "over" : ""}" title="max single-request input — dashed cliff is ${fmt(CTX_LIMIT)}">${fmt(s.maxContext)}</b></span>` +
-      `<span class="ago">${ago(s.lastAt)}</span></div>`;
+      `<span class="ago">${ago(s.lastAt)}</span></div>` +
+      (open ? `<div class="chipdetail" id="detail-${esc(s.id)}">${detailHtml(detailCache.get(s.id))}</div>` : "");
   }).join("");
 
   // tree — newest roots first, children newest first
@@ -380,6 +472,8 @@ async function poll() {
     const res = await fetch("/api/state");
     const state = await res.json();
     render(state);
+    // keep the open detail panel fresh (fetchDetail throttles to 4s)
+    if (expandedId) fetchDetail(expandedId);
     $("poll").classList.remove("stale");
     $("poll-text").textContent = "live · " + new Date(state.generatedAt).toLocaleTimeString();
     if (state.pollError) $("errbar").textContent = "poll warning: " + state.pollError;
