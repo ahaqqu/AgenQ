@@ -121,7 +121,8 @@
   .ticker { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
   .ticker .thead { padding: 8px 14px; background: var(--panel2); color: var(--dim); font-size: 11px; letter-spacing: 1px; }
   .ticker ul { list-style: none; margin: 0; padding: 8px 14px 10px; font-size: 12px; }
-  .ticker li { display: flex; gap: 10px; padding: 1px 0; color: var(--dim); }
+  .ticker li { display: flex; gap: 10px; padding: 1px 0; color: var(--dim); cursor: pointer; }
+  .ticker li:hover { background: var(--panel2); }
   .ticker li .t { color: var(--text); }
   .ticker li.new { animation: slidein .5s ease; }
   @keyframes slidein { from { opacity: 0; transform: translateY(-6px); } }
@@ -130,7 +131,9 @@
   .activewrap .thead { display: flex; align-items: center; padding: 8px 14px; background: var(--panel2); color: var(--ok); font-size: 11px; letter-spacing: 1px; cursor: pointer; }
   .activewrap .thead .caret { margin-left: auto; }
   .activewrap.collapsed .activebar { display: none; }
-  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
+  .duo .ticker, .duo .alert.show { display: flex; flex-direction: column; }
+  .duo .ticker ul { flex: 1; }
   @media (max-width: 950px) { .duo { grid-template-columns: 1fr; } }
   .duo .ticker { margin-top: 0; }
   .duo .alert { margin-bottom: 0; }
@@ -160,7 +163,7 @@
   <main>
   <div class="legend" id="legend"></div>
   <div class="activewrap" id="activewrap">
-    <div class="thead" id="activetoggle" title="click to collapse">ACTIVE NOW — activity in the last 5m · idle longer = sleep<span class="caret">▾</span></div>
+    <div class="thead" id="activetoggle" title="click to collapse">ACTIVE NOW — activity in the last 5m<span class="caret">▾</span></div>
     <div class="activebar" id="activebar"></div>
   </div>
   <div class="duo">
