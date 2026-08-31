@@ -19,13 +19,46 @@ supplying their own role-agent definitions.
 ## Model selection
 
 Every role ships **pinned by default**: each agent file carries a
-`model: <providerId>/<modelName>` field, so the workflow runs on the same
+`model: <providerRef>` field, so the workflow runs on the same
 models everywhere unless you override it. The committed pins all name the
-provider channel `ollama/glm-5.3-flash:cloud`. This differs from the
-upstream template, which pins a caching provider channel and rejects
-committed `ollama/*` pins (`template-gate`) — AgenQ is not a template fork
-and ships no gate, so the pin is a plain per-project choice. Re-pin via
-these files or keep a user-scope override in `~/.zcode/agents/<role>.md`.
+provider channel `glm-5.3-flash:cloud` on the machine's registered
+OpenAI-compatible provider (`d5585e04-940a-41f6-a9ec-320bb4fccd7e`,
+baseURL `https://ollama.com/v1`), in the serialization form the ZCode UI
+writes itself:
+
+- `model: "custom:<providerId>:<modelName>"` — e.g.
+  `"custom:d5585e04-940a-41f6-a9ec-320bb4fccd7e:glm-5.3-flash%3Acloud"`
+  (the `%3A` is URL-encoding for the `:` inside the model name). This is
+  the UI-generated form and the one verified to spawn — 2026-08-31, live
+  dispatch after restart (workspace pin edited via Settings → Subagents,
+  telemetry `querySource=subagent` resolving to the intended provider).
+- Previously these files pinned `ollama/glm-5.3-flash:cloud`, which
+  **fails at spawn time** with `Model provider is not configured: ollama`:
+  `ollama` is the site's display name, not a registered provider id. The
+  `<providerId>/<modelName>` form is also **not accepted** for this
+  registration — only the `custom:...` serialization resolves.
+- `inherit` — explicitly inherit the session default.
+- A bare `<modelName>` — resolved against the session's default provider.
+
+This differs from the upstream template, which pins a caching provider
+channel and rejects committed `ollama/*` pins (`template-gate`) — AgenQ
+is not a template fork and ships no gate, so the pin is a plain
+per-project choice. Re-pin via these files or keep a user-scope override
+in `~/.zcode/agents/<role>.md`.
+
+**Portability caveat:** the committed `custom:` pin embeds a
+**machine-specific provider id**. On a fresh clone the provider id will
+differ, and every pinned role fails at spawn with
+`Model provider is not configured: <id>` until re-pinned. Because user
+scope overrides workspace scope, the zero-edit migration path is to keep
+the committed files as-is and put a one-line override per role in
+`~/.zcode/agents/<role>.md` with the local provider's `custom:` ref —
+or remove the `model:` line entirely to inherit the session default.
+Frontmatter edits only reach spawns after a client restart (caveat
+below). Also note `assistant-manager.md`'s frontmatter is
+**UI-canonical** (quoted scalars, `color:`, `injectAgentsMd:` — written
+by Settings → Subagents on save); the other six role files are
+hand-kept and intentionally simpler.
 
 Resolution order (used by ZCode):
 
@@ -46,10 +79,8 @@ separately by default; a user-scope override that drops a sub-reviewer's
 
 Recognized `model:` values:
 
-- `<providerId>/<modelName>` — a concrete provider/model ref, e.g.
-  `ollama/glm-5.3-flash:cloud`. **The only accepted form.**
-- `inherit` — explicitly inherit the session default.
-- A bare `<modelName>` — resolved against the session's default provider.
+- `<providerId>/<modelName>` or UI `custom:` refs — see the model-selection
+  section above for the accepted serialization forms.
 
 ### Thought level
 
@@ -83,21 +114,23 @@ spawn time; it does not hard-fail. Check agent discoverability in ZCode via
 
 ### Pinned defaults per role
 
-All committed pins name `ollama/glm-5.3-flash:cloud` (one concrete pin per
-role, single channel — the tiering is expressed by `thoughtLevel` and role
+All committed pins name `custom:d5585e04-…:glm-5.3-flash%3Acloud` — one
+concrete pin per role, single provider channel (the tiering is expressed by
+`thoughtLevel` and role
 scope, not by separate model ids; re-pin per role via a user-scope override
-if you need different tiers).
+if you need different tiers). The full provider id is
+`d5585e04-940a-41f6-a9ec-320bb4fccd7e`.
 
 | Role | Agent file | Pinned model | Rationale |
 | --- | --- | --- | --- |
 | manager | (the session's own model — the manager is the session agent) | session model | orchestrates, never implements |
-| implementer (default) | `implementer.md` | `ollama/glm-5.3-flash:cloud` | does most of the regular-complexity work |
-| senior-implementer (hard/`model:high`) | `senior-implementer.md` | `ollama/glm-5.3-flash:cloud` | tickets where failure is silent (validators, trap questions, sample audits) — do not downgrade `thoughtLevel` |
-| reviewer (coordinator) | `reviewer.md` | `ollama/glm-5.3-flash:cloud` | coordinates the review and posts findings |
-| thermo-nuclear-review-subagent | `thermo-nuclear-review-subagent.md` | `ollama/glm-5.3-flash:cloud` | security/correctness pass |
-| thermo-nuclear-code-quality-review-subagent | `thermo-nuclear-code-quality-review-subagent.md` | `ollama/glm-5.3-flash:cloud` | maintainability pass |
-| assistant-manager | `assistant-manager.md` | `ollama/glm-5.3-flash:cloud` | read-only fact-finding and adjudication evidence |
-| test-implementer (`model:high` test phase) | `test-implementer.md` | `ollama/glm-5.3-flash:cloud` | writes the suite from the senior's test brief; never touches production source, never opens a PR |
+| implementer (default) | `implementer.md` | `custom:d5585e04-…:glm-5.3-flash%3Acloud` | does most of the regular-complexity work |
+| senior-implementer (hard/`model:high`) | `senior-implementer.md` | `custom:d5585e04-…:glm-5.3-flash%3Acloud` | tickets where failure is silent (validators, trap questions, sample audits) — do not downgrade `thoughtLevel` |
+| reviewer (coordinator) | `reviewer.md` | `custom:d5585e04-…:glm-5.3-flash%3Acloud` | coordinates the review and posts findings |
+| thermo-nuclear-review-subagent | `thermo-nuclear-review-subagent.md` | `custom:d5585e04-…:glm-5.3-flash%3Acloud` | security/correctness pass |
+| thermo-nuclear-code-quality-review-subagent | `thermo-nuclear-code-quality-review-subagent.md` | `custom:d5585e04-…:glm-5.3-flash%3Acloud` | maintainability pass |
+| assistant-manager | `assistant-manager.md` | `custom:d5585e04-…:glm-5.3-flash%3Acloud` | read-only fact-finding and adjudication evidence |
+| test-implementer (`model:high` test phase) | `test-implementer.md` | `custom:d5585e04-…:glm-5.3-flash%3Acloud` | writes the suite from the senior's test brief; never touches production source, never opens a PR |
 
 ## Phase-boundary discipline
 
