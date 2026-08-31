@@ -19,7 +19,6 @@
 //    metadata aborts the update (never corrupts the file).
 
 const USAGE_SOURCE = "scripts/agent-usage-metadata";
-const USAGE_KEYS = ["usage", "usageCaptures"];
 
 function isPlainObject(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -33,6 +32,9 @@ function nonEmptyString(v) {
 //   {ok:true, event:"task-output", agentId}
 //   {ok:true, event:"agent-dispatch", toolUseId}
 //   {ok:false, reason} — never throws.
+// Hand-rolled on purpose: this hook only consumes a different event subset
+// than the guardrail's valibot envelope (../lib/zcode-hook.ts) — see that
+// file for the canonical payload contract before extending either.
 export function parseHookPayload(raw) {
   let payload;
   try {
@@ -64,7 +66,10 @@ export function parseHookPayload(raw) {
 }
 
 // TaskOutput's task_id for a subagent dispatch is the agent id (with or
-// without the "agent_" prefix).
+// without the "agent_" prefix). Same caveat as the guardrail's session-id
+// pattern (scripts/iteration-guardrail/scope.mjs): an OBSERVED harness
+// convention, not a documented contract — if the id shape changes, this is
+// the line to revisit.
 function agentIdFromTaskId(toolInput) {
   if (!isPlainObject(toolInput)) return undefined;
   const taskId = nonEmptyString(toolInput.task_id);
@@ -198,10 +203,4 @@ export function mergeUsageIntoMetadata(metadataText, totals) {
 
 export function serializeMetadata(metadata) {
   return `${JSON.stringify(metadata, null, 2)}\n`;
-}
-
-// Which usage keys this hook owns: a caller can strip them to restore the
-// pre-hook document. Exported so the ownership stays explicit.
-export function ownedUsageKeys() {
-  return [...USAGE_KEYS];
 }

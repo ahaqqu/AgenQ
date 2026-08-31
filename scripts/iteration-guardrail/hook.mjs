@@ -30,6 +30,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
+import { emitEvent } from "../lib/hook-io.mjs";
 // Relative TS import: bun (and vitest) transpile it, and the repo's isolated
 // linker does not expose workspace packages to root-level scripts.
 import { parseZcodeHookPayload } from "../lib/zcode-hook.ts";
@@ -56,10 +57,9 @@ import {
 const STATE_SCHEMA_VERSION = 1;
 
 function emit(event, fields) {
-  // Structured JSON on stderr only. Never exit non-zero for logging problems.
-  process.stderr.write(
-    `${JSON.stringify({ time: new Date().toISOString(), script: "iteration-guardrail", event, ...fields })}\n`,
-  );
+  // Structured JSON on stderr only (no sidecar log). Never exit non-zero
+  // for logging problems.
+  emitEvent("iteration-guardrail", event, fields);
 }
 
 function readStdin() {
