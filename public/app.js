@@ -97,18 +97,7 @@ function currentActivity(s) {
   return "…";
 }
 
-// inline origin mark: emoji always (tight rows), + text label on wide rows
-// when asked. The text part is what makes a mixed board readable at a glance
-// on the card/root level where there's room for it.
-function harnessMark(s, withLabel = false) {
-  const h = s.harness ?? "";
-  if (!h) return "";
-  const e = HARNESS_EMOJI[h] ?? "🔗";
-  return `<span class="hmark ${withLabel ? "wide" : ""}" title="harness: ${esc(h)}">${e}${withLabel ? " " + esc(h) : ""}</span>`;
-}
-
 let prev = null;
-let multiHarness = false;
 let filterProject = "all";
 let harnessById = new Map(); // harness id -> { id, label, emoji, hasStop }
 let flashId = null; // banner click → highlight this card until flashUntil
@@ -120,7 +109,7 @@ function agentCard(s) {
   const name = s.role ?? (s.title ? "main" : "session");
   const sparkId = "spark-" + s.id;
   const modelHtml = [s.model, s.thinking && `[${s.thinking}]`].filter(Boolean).join(" ");
-  const harnessBadge = multiHarness ? harnessMark(s, true) : "";
+  const harnessBadge = harnessMark(s, true);
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
   const todoHtml = (s.todos ?? []).slice(0, 8).map((t) =>
@@ -146,8 +135,10 @@ function agentCard(s) {
 }
 
 // stop is a project action: every harness process in that directory is
-// the same run, and all of them die together
-async function stopProject(directory, project, procCount, harness) {
+// the same run, and all of them die together. The sessionId is sent so the
+// server resolves the stop target through the exact session this dialog
+// was built from (matches its own snapshot-order resolution).
+async function stopProject(directory, project, procCount, harness, sessionId) {
   const ok = confirm(
     `Kill ${procCount} live ${harness ?? "harness"} process${procCount === 1 ? "" : "es"} in "${project}"?\n\n` +
     `This stops the whole project run — every session in\n${directory}\n` +
@@ -158,7 +149,7 @@ async function stopProject(directory, project, procCount, harness) {
     const res = await fetch("/api/stop", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ directory }),
+      body: JSON.stringify({ directory, sessionId }),
     });
     const out = await res.json();
     if (out.killed?.length) {
@@ -187,7 +178,7 @@ function onStopClick(e) {
   const btn = e.target.closest(".stopbtn");
   if (!btn) return false;
   const harness = harnessById.get(btn.dataset.harness ?? "")?.label;
-  stopProject(btn.dataset.dir, btn.dataset.name, Number(btn.dataset.procs), harness);
+  stopProject(btn.dataset.dir, btn.dataset.name, Number(btn.dataset.procs), harness, btn.dataset.session ?? null);
   return true;
 }
 
@@ -262,9 +253,19 @@ $("legend").innerHTML = `
     <div class="lrow"><span class="ic">🤖</span> other subagent role</div>
     <div class="lrow"><span class="ic">💤</span> idle 5m+ but process still alive</div>
     <div class="lrow"><span class="ic">⚠</span> last error of that agent</div>
-    <div class="lrow"><span class="ic">🦓</span> harness mark — every row shows which harness runs the agent (🦓 ZCode, 👟 Hermes)</div>
+    <div class="lrow"><span class="ic" id="legend-harness">🔗</span> harness mark — every row shows which harness runs the agent (<span id="legend-harnesses"></span>)</div>
     <div class="lrow"><span class="ic">⏹</span> kill process — stops every live process of that project run (the whole run stops)</div>
   </div>`;
+
+// the legend's harness list comes from the mounted adapters, not from a
+// hardcoded string — it can't drift when a harness is added or renamed
+function renderLegendHarnesses(harnesses) {
+  const row = $("legend-harnesses");
+  if (!row) return;
+  row.innerHTML = (harnesses ?? []).map((h) =>
+    `<span title="harness: ${esc(h.id)}">${esc(h.emoji ?? HARNESS_EMOJI[h.id] ?? "🔗")} ${esc(h.label)}</span>`
+  ).join(" · ") || "none mounted";
+}
 
 function render(state) {
   // copying something? defer the re-render until the selection is gone —
@@ -273,8 +274,8 @@ function render(state) {
   if (selection && !selection.isCollapsed) return;
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
   computeInstances(state.sessions);
-  multiHarness = (state.harnesses?.length ?? 0) > 1;
   harnessById = new Map((state.harnesses ?? []).map((h) => [h.id, h]));
+  renderLegendHarnesses(state.harnesses);
 
   // project filter dropdown
   const projects = [...new Set(state.sessions.map((s) => s.project).filter(Boolean))].sort();
@@ -313,14 +314,15 @@ function render(state) {
       const procs = state.liveProcs?.[dir] ?? 0;
       const proj = list[0].project ?? "unknown project";
       const stoppable = dir !== "?" && procs > 0 && !stoppedDirs.has(dir);
-      // stop buttons carry their owning harness both for the confirm dialog
-      // text and so /api/stop can route to the right adapter
+      // The dialog names the run via the stop target's owning harness;
+      // routing itself is the server's job — it resolves the same session
+      // (list[0], snapshot order) through the sessionId we send below.
       const owner = list.find((s) => s.harness)?.harness;
       return `
       <div class="agroup">
         <div class="agroup-head">
           <span title="${esc(dir)}">${esc(shortProject(proj))}</span>
-          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" data-harness="${esc(owner ?? "")}" title="SIGTERM all ${procs} live process(es) of this ${esc(harnessById.get(owner ?? "")?.label ?? "harness")} run in ${esc(dir)}">⏹ kill ${procs} process${procs === 1 ? "" : "es"}</button>`
+          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" data-session="${esc(list[0].id)}" data-harness="${esc(owner ?? "")}" title="SIGTERM all ${procs} live process(es) of this ${esc(harnessById.get(owner ?? "")?.label ?? "harness")} run in ${esc(dir)}">⏹ kill ${procs} process${procs === 1 ? "" : "es"}</button>`
             : stoppedDirs.has(dir) ? `<span class="stoppedmark">⏹ stopped by you</span>` : ""}
         </div>
         ${list.map((s) => {
@@ -371,7 +373,7 @@ function render(state) {
           ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
           <span class="model">${esc([root.model, root.thinking && `[${root.thinking}]`].filter(Boolean).join(" "))}</span>
-          ${multiHarness ? harnessMark(root, true) : ""}
+          ${harnessMark(root, true)}
           <span class="meta">${statsHtml(root)} · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
         <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
@@ -408,7 +410,7 @@ function render(state) {
       (t.status ? ` · ${t.status}` : "") +
       (t.outputBytes != null ? ` · ${fmt(t.outputBytes)}B` : "");
     const right = [t.outputBytes != null ? `${fmt(t.outputBytes)}B` : "", ago(t.at)].filter(Boolean).join(" · ");
-    return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="${esc(tip)}"><span class="l">${agent ? harnessMark(agent) + " " + roleIcon(agent) + " " + labelHtml(agent) : "session"} <span class="act">${esc(prettyTool(t.tool))} ${t.status ?? ""}</span></span><span class="dash">-</span><span class="r">${esc(tagged(right, agent))}</span></li>`;
+    return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="${esc(tip)}"><span class="l">${agent ? harnessMark(agent) + " " + roleIcon(agent) + " " + labelHtml(agent) : harnessMark(t.harness ?? t.sessionId) + " session"} <span class="act">${esc(prettyTool(t.tool))} ${t.status ?? ""}</span></span><span class="dash">-</span><span class="r">${esc(tagged(right, agent))}</span></li>`;
   }).join("");
 
   prev = state;

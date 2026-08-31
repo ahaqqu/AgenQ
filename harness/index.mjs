@@ -55,27 +55,22 @@ export async function snapshot(now = Date.now()) {
   const warnings = [];
 
   for (const adapter of ADAPTERS) {
+    const liveProcs = {};
     try {
       const snap = await adapter.snapshot(now);
       sessions.push(...snap.sessions.map((s) => namespaceSession(adapter.id, s)));
-      if (snap.ticker?.length) tickers.push(...snap.ticker.map((t) => ({ ...t, sessionId: nsId(adapter.id, t.sessionId) })));
-      if (snap.liveProcs) {
-        // namespaces live-proc directories too — stop requests address them
-        // by directory, and directory shapes may differ per harness
-        harnesses.push({
-          id: adapter.id,
-          label: adapter.label,
-          emoji: adapter.emoji ?? null,
-          hasStop: adapter.hasStop === true,
-          liveProcs: snap.liveProcs,
-        });
-      } else {
-        harnesses.push({ id: adapter.id, label: adapter.label, emoji: adapter.emoji ?? null, hasStop: adapter.hasStop === true, liveProcs: {} });
-      }
+      if (snap.ticker?.length) tickers.push(...snap.ticker.map((t) => ({ ...t, sessionId: nsId(adapter.id, t.sessionId), harness: adapter.id })));
+      if (snap.liveProcs) Object.assign(liveProcs, snap.liveProcs);
     } catch (e) {
       warnings.push(`${adapter.id}: ${e?.message ?? String(e)}`);
-      harnesses.push({ id: adapter.id, label: adapter.label, emoji: adapter.emoji ?? null, hasStop: adapter.hasStop === true, liveProcs: {} });
     }
+    harnesses.push({
+      id: adapter.id,
+      label: adapter.label,
+      emoji: adapter.emoji ?? null,
+      hasStop: adapter.hasStop === true,
+      liveProcs,
+    });
   }
 
   const byIdAll = new Map(sessions.map((s) => [s.id, s]));
@@ -88,10 +83,12 @@ export async function snapshot(now = Date.now()) {
     .map((s) => s.id);
 
   // global ticker: prefer harness-provided tickers (richer tool history);
-  // fall back to per-session lastTool entries when a harness offers none
+  // fall back to per-session lastTool entries when a harness offers none.
+  // Entries carry `harness` so the UI can mark rows whose session is
+  // outside the render window.
   const ticker = (tickers.length
     ? tickers
-    : sessions.flatMap((s) => (s.lastTool ? [{ sessionId: s.id, ...s.lastTool }] : [])))
+    : sessions.flatMap((s) => (s.lastTool ? [{ sessionId: s.id, harness: s.harness, ...s.lastTool }] : [])))
     .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
     .slice(0, 15);
 

@@ -11,9 +11,10 @@ const ROLE_EMOJI = {
   "thermo-nuclear-code-quality-review-subagent": "🧹",
   "assistant-manager": "🔎",
 };
-// harness origin marks — fallbacks so a newly mounted harness gets a working
-// badge before anyone updates this map; unknown ids degrade to a link mark,
-// never to "no badge"
+// harness origin marks. The adapter's declared `emoji` (state.harnesses)
+// wins once the first snapshot has landed; HARNESS_EMOJI covers the
+// pre-snapshot window and unknown ids; unknown harnesses degrade to 🔗,
+// never to "no badge".
 const HARNESS_EMOJI = {
   "zcode": "🦓",
   "hermes": "👟",
@@ -21,11 +22,12 @@ const HARNESS_EMOJI = {
 // Inline origin mark for every row/item that shows an agent: emoji always,
 // plus the text label on wide rows (withLabel). Tight rows (chips, ticker,
 // failed alerts) get emoji only; the full harness name is always in the
-// tooltip.
+// tooltip. Accepts a session object (uses its `harness` field), a bare
+// harness id (ticker entries), or null.
 function harnessMark(s, withLabel = false) {
-  const h = s.harness ?? "";
+  const h = typeof s === "string" ? s : (s?.harness ?? "");
   if (!h) return "";
-  const e = HARNESS_EMOJI[h] ?? "🔗";
+  const e = harnessById?.get(h)?.emoji ?? HARNESS_EMOJI[h] ?? "🔗";
   return `<span class="hmark ${withLabel ? "wide" : ""}" title="harness: ${esc(h)}">${e}${withLabel ? " " + esc(h) : ""}</span>`;
 }
 const CTX_LIMIT = 200_000; // the cliff from the #94 analysis

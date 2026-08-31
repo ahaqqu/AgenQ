@@ -10,8 +10,10 @@ Two kinds of difference live here:
 - **Inherent** — the harness's telemetry genuinely does not record it. No
   adapter work can recover it; the board cell stays empty for that harness.
 - **Recoverable** — the harness records it, but the adapter does not read it
-  yet. Every one of these has a "How" sketch. These are candidates, not
-  commitments — each needs a review decision before implementation.
+  yet. Split into two tiers below: work that stays inside the current
+  contract, and work that adds an optional contract field. Every one of
+  these has a "How" sketch; they are candidates, not commitments — each
+  needs a review decision before implementation.
 
 The board never renders harness-specific extras: a field the schema doesn't
 define is dropped (or listed as recoverable below). That keeps every harness
@@ -45,20 +47,30 @@ Statuses were taken from what the schemas offer at the time of writing
 | Detail panel: thinking | newest `reasoning` part row | `reasoning`/`reasoning_content` columns | **parity** |
 | Detail panel: diff stats | `summary_additions/deletions/files` | not tracked | **inherent** |
 
-## Recoverable now (adapter work only, no contract change)
+## Recoverable with adapter work only (no schema change)
 
-Nothing here changes the snapshot schema — the data already fits the contract;
-the adapter just doesn't read it yet.
+The data already fits the existing snapshot contract; the adapter just
+doesn't read it yet. A display change may accompany it, but no new field
+crosses the registry boundary.
 
 | What | Harness | Where it sits | How |
 | --- | --- | --- | --- |
-| Cost per session ($) | both | zcode: not exposed in `model_usage` (only provider totals); hermes: `sessions.estimated_cost_usd`, `actual_cost_usd`, `billing_provider` | hermes: map to a display-only field; **zcode has no cost column today** — would need `raw_usage_json` pricing offline. Simple approach: add `costUsd` (optional) to the snapshot contract, render in the card stats when present |
-| Thinking tokens | both | zcode: `model_usage.reasoning_tokens` (already in detail panel); hermes: `session_model_usage.reasoning_tokens` (already summed in detail) | **surface on the card stats line** (`th 1.2k`), one shared UI change; adapters pass the sum through a new optional `reasoningTokens` field |
 | Gateway/liveness info | hermes | `gateway_heartbeats` (backend_id, pid, profile, host, last_heartbeat) | could mark a hermes board "gateway alive" — but per-**session** liveness (what the board's `live` needs) is still not derivable, since all sessions share pid(s). Document-only for now |
 | End reason | hermes | `sessions.end_reason`, `end_state`-adjacent columns, `rewind_count` | map `ended_at`+`end_reason` into a richer `done` (e.g. tooltip "completed · user exit · 3 rewinds"); pure adapter mapping |
-| Git context | both | zcode: `session.path`/project linkage only; hermes: `git_branch`, `git_repo_root`, `git_metadata_generation` | new optional `gitBranch`/`gitRepo` snapshot fields, card tooltip. Simple approach: hermes-only first, zcode gets it when its telemetry records a branch |
-| Activity description | hermes | `sessions.last_activity_description` (human string of what the session last did) | could replace the "…" fallback in the Active Now chip when harness-specific text is all there is. Optional `lastActivity` field; UI uses it only when `lastTool`/todos are empty |
 | Session pinning/read state | hermes | `pinned`, `last_read_at`, `hidden` | mostly out of scope for a monitor; listed for completeness |
+
+## Recoverable with one additive snapshot field
+
+Adapter-side work plus a single optional contract field (additive, optional —
+harnesses that can't supply it leave it unset and the UI hides it). Each is
+small, but it *is* a contract change, so it lands here for an explicit yes/no.
+
+| What | Harness | Where it sits | How |
+| --- | --- | --- | --- |
+| Cost per session ($) | both | zcode: not exposed in `model_usage` (only provider totals); hermes: `sessions.estimated_cost_usd`, `actual_cost_usd`, `billing_provider` | new optional `costUsd` snapshot field, rendered in the card stats when present. **zcode has no cost column today** — would need `raw_usage_json` pricing offline, so hermes-only first |
+| Thinking tokens | both | zcode: `model_usage.reasoning_tokens` (already in detail panel); hermes: `session_model_usage.reasoning_tokens` (already summed in detail) | new optional `reasoningTokens` snapshot field, **surfaced on the card stats line** (`th 1.2k`) |
+| Git context | both | zcode: `session.path`/project linkage only; hermes: `git_branch`, `git_repo_root`, `git_metadata_generation` | new optional `gitBranch`/`gitRepo` snapshot fields, card tooltip. Hermes-only first; zcode gets it when its telemetry records a branch |
+| Activity description | hermes | `sessions.last_activity_description` (human string of what the session last did) | new optional `lastActivity` snapshot field; the Active Now chip uses it only when `lastTool`/todos are empty |
 
 ## Recoverable with a contract change
 

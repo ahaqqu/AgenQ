@@ -89,8 +89,9 @@ registry only namespaces them.
    against that harness's telemetry (SQLite, JSONL, whatever it leaves on
    disk). Give it its own `config.mjs` for flags and defaults, mirroring
    `harness/zcode/config.mjs` — `windowHours` and any `--<harness>-…` paths.
-   Pick an `emoji` for the origin marks (add it to `HARNESS_EMOJI` in
-   `public/visuals.js` so it renders before the first snapshot too).
+   Pick an `emoji` for the origin marks — the board renders it from the
+   `harnesses[]` payload; the `HARNESS_EMOJI` map in `public/visuals.js`
+   is only the fallback for the moment before the first snapshot.
 2. Register it in `harness/index.mjs`.
 3. If it has a stop action, implement `stopRun` and set `hasStop: true`.
 
