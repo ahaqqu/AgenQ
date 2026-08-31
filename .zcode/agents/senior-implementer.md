@@ -4,7 +4,7 @@ description: Senior implementer for the manager-orchestrated agentic workflow. U
 background: true
 tools: ['*']
 skills: [guided-implementation]
-model: ollama/glm-5.3-flash:cloud
+model: "custom:d5585e04-940a-41f6-a9ec-320bb4fccd7e:glm-5.3-flash%3Acloud"
 thoughtLevel: high
 ---
 

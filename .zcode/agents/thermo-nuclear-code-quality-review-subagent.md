@@ -3,7 +3,7 @@ name: thermo-nuclear-code-quality-review-subagent
 description: Maintainability and code-quality reviewer for the code-review skill's thermos depth (thermos / thermos-with-comments). Extremely strict audit of abstraction quality, file-size growth, spaghetti-condition growth, and structural regressions.
 background: true
 tools: ['*']
-model: ollama/glm-5.3-flash:cloud
+model: "custom:d5585e04-940a-41f6-a9ec-320bb4fccd7e:glm-5.3-flash%3Acloud"
 thoughtLevel: high
 ---
 
