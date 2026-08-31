@@ -99,6 +99,9 @@
     cursor: default;
   }
   .head .title { font-weight: 700; }
+  .head .model { color: var(--dim); font-size: 11px; }
+  /* token stats ride the right edge, like the active-now chips */
+  .head .meta { flex: 0 1 auto; margin-left: auto; min-width: 20ch; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
   .head .meta { color: var(--dim); font-size: 11px; }
   .head .meta b { color: var(--text); font-weight: 400; }
   .kids { padding: 10px 12px 14px; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
@@ -120,7 +123,8 @@
   @keyframes pulse { 50% { opacity: .35; transform: scale(.8); } }
   .nums { display: flex; gap: 14px; margin: 8px 0 6px; font-size: 12px; color: var(--dim); }
   .nums b { color: var(--text); }
-  .nums .when { margin-left: auto; flex: none; }
+  /* standalone "when" row in agent cards: its own line, left-aligned */
+  .kid .when { font-size: 12px; color: var(--dim); margin: 8px 0 0; }
   /* stat thresholds: green comfortable, amber close, red critical
      (compound selectors so they win over the `.chip .r b` / `.nums b` /
      `.head .meta b` base colors — note those b-rules out-specify bare .st-*) */
@@ -131,8 +135,6 @@
   .st-hot, .nums .st-hot, .meta .st-hot, .chip .r .st-hot,
   .nums b.st-hot, .meta b.st-hot, .chip .r b.st-hot { color: var(--fail); font-weight: 700; }
   canvas.spark { width: 100%; height: 44px; display: block; }
-  .cap { font-size: 10px; color: var(--dim); margin-top: 2px; }
-  .cap .over { color: var(--fail); font-weight: 700; }
   .desc { color: var(--dim); font-size: 11px; margin-top: 6px; max-height: 2.6em; overflow: hidden; }
   ul.todos { list-style: none; margin: 8px 0 0; padding: 0; font-size: 12px; }
   ul.todos li { padding: 1px 0; color: var(--dim); }

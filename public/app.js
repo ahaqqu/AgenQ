@@ -50,18 +50,27 @@ function drawSpark(canvas, series) {
   ctx.scale(devicePixelRatio, devicePixelRatio);
   ctx.clearRect(0, 0, w, h);
   if (!series || series.length < 2) return;
-  const max = Math.max(...series, 1);
+  // plot backdrop distinct from the card background (card = --bg)
+  const style = getComputedStyle(document.documentElement);
+  ctx.fillStyle = style.getPropertyValue("--panel").trim() || "#131824";
+  ctx.beginPath();
+  ctx.roundRect(0, 0, w, h, 4);
+  ctx.fill();
+  // y-scale always spans the context cliff so the 200k line (and what's
+  // under vs. over it) is readable even on quiet sessions
+  const max = Math.max(...series, CTX_LIMIT);
   const step = w / (series.length - 1);
+  const yOf = (v) => h - (v / max) * (h - 4) - 2;
   // area
   ctx.beginPath();
   ctx.moveTo(0, h);
-  series.forEach((v, i) => ctx.lineTo(i * step, h - (v / max) * (h - 4) - 2));
+  series.forEach((v, i) => ctx.lineTo(i * step, yOf(v)));
   ctx.lineTo(w, h);
   ctx.closePath();
   ctx.fillStyle = "rgba(110,168,254,.15)";
   ctx.fill();
   // line, turning red past the context cliff
-  const scaled = series.map((v) => h - (v / max) * (h - 4) - 2);
+  const scaled = series.map(yOf);
   ctx.beginPath();
   series.forEach((v, i) => {
     const x = i * step, y = scaled[i];
@@ -70,20 +79,26 @@ function drawSpark(canvas, series) {
   ctx.strokeStyle = max > CTX_LIMIT ? "#e5534b" : "#6ea8fe";
   ctx.lineWidth = 1.5;
   ctx.stroke();
-  // cliff marker if visible
-  if (max > CTX_LIMIT) {
-    const y = h - (CTX_LIMIT / max) * (h - 4) - 2;
+  // cliff marker + label, always drawn now that the scale reaches 200k
+  {
+    const y = yOf(CTX_LIMIT);
     ctx.setLineDash([3, 3]);
     ctx.strokeStyle = "rgba(229,83,75,.5)";
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
     ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(229,83,75,.8)";
+    ctx.font = "9px ui-monospace, monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(fmt(CTX_LIMIT), w - 2, y - 2);
   }
+  ctx.textAlign = "left";
 }
 
 function agentCard(s) {
   const emoji = ROLE_EMOJI[s.role] ?? "🤖";
   const name = s.role ?? (s.title ? "main" : "session");
   const sparkId = "spark-" + s.id;
+  const modelHtml = [s.model, s.thinking && `[${s.thinking}]`].filter(Boolean).join(" ");
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
   const todoHtml = (s.todos ?? []).slice(0, 8).map((t) =>
@@ -95,12 +110,12 @@ function agentCard(s) {
       <span class="status ${esc(dot)}" title="${esc(s.status)}${s.live === false ? " · process exited" : ""}"></span>
       <span>${emoji}</span>
       <span class="name">${esc(name)}</span>
-      <span class="model">${esc(s.model ?? "")}</span>
+      <span class="model">${esc(modelHtml)}</span>
     </div>
-    <div class="nums"><span class="stats">${statsHtml(s)}</span><span class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</span></div>
-    <canvas class="spark" id="${sparkId}"></canvas>
-    <div class="cap">input tokens / request — dashed line = ${fmt(CTX_LIMIT)} context cliff</div>
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
+    <div class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</div>
+    <div class="nums"><span class="stats">${statsHtml(s)}</span></div>
+    <canvas class="spark" id="${sparkId}" title="Token use per request. The dashed red line is the ${(CTX_LIMIT / 1000).toFixed(1)}k context cliff — past it the line turns red.&#10;x-axis: requests, oldest to newest (last 120, spaced by request order, not by time)&#10;y-axis: input tokens, 0 up to the ${(CTX_LIMIT / 1000).toFixed(1)}k cliff"></canvas>
     ${todoHtml ? `<ul class="todos">${todoHtml}</ul>` : ""}
     ${s.lastError ? `<div class="err">⚠ ${esc(humanType(s.lastError.type))}: ${esc(s.lastError.message ?? "")}${s.live === false ? " · run exited" : ""}</div>` : ""}
     ${s.lastError && s.directory && stoppedDirs.has(s.directory) ? `<div class="stoppedmark">⏹ stopped by you — project run killed</div>` : ""}
@@ -513,6 +528,7 @@ function render(state) {
           <span>🧑‍✈️</span>
           ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
+          <span class="model">${esc([root.model, root.thinking && `[${root.thinking}]`].filter(Boolean).join(" "))}</span>
           <span class="meta">${statsHtml(root)} · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
         <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
