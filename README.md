@@ -4,7 +4,7 @@ Live mission-control monitor for [ZCode](https://github.com/ahaqqu) main session
 
 AgenQ reads (read-only) the telemetry ZCode already writes on disk and turns it into a live board:
 
-![AgenQ mission control — an ACTIVE NOW row expanded into its live detail panel](docs/screenshot.png)
+![AgenQ mission control — agent tree with model + thinking level on every card, tool ticker, failure alerts, and token-burn sparklines against the 200k context cliff](docs/screenshot.png)
 
 - **Agent tree** — the manager session with every dispatched subagent under it (role, model, live status)
 - **Token-burn sparklines** — input tokens per request per agent, with a dashed marker at the 200K context cliff (the cliff that cost 36M tokens in the run that motivated this tool — see ahaqqu/agentic-project-template#94)
