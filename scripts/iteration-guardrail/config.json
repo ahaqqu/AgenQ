@@ -1,0 +1,18 @@
+{
+  "scope": "subagents-only",
+  "subagentSessionPattern": "^sess_subagent_agent_",
+  "sameFailureCap": 3,
+  "distinctFailureCap": 8,
+  "verificationPatterns": [
+    "\\bbun run (check|test|typecheck|lint)\\b",
+    "\\bbun test\\b",
+    "\\bbunx? (vitest|jest|playwright|tsc|eslint|prettier|pyright|mypy|pytest)\\b",
+    "\\b(npm|pnpm|yarn) (run |)(test|check|typecheck|lint)\\b",
+    "\\bvitest\\b",
+    "\\bpytest\\b",
+    "\\bgo test\\b",
+    "\\bcargo (test|check|clippy)\\b",
+    "\\bmake (test|check|lint)\\b",
+    "\\bgh pr checks?\\b"
+  ]
+}

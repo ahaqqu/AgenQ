@@ -1,0 +1,20 @@
+{
+  "_meta": "Runtime-derived fixture (review A5): PostToolUse on Edit (a fix attempt) with the envelope fields the runtime delivers. CI parses this to catch contract drift.",
+  "agent_type": "implementer",
+  "cwd": "/home/user/project",
+  "hook_event_name": "PostToolUse",
+  "permission_mode": "default",
+  "session_id": "sess_fixture_postedit",
+  "tool_input": {
+    "file_path": "/home/user/project/packages/contracts/src/index.ts",
+    "new_string": "export",
+    "old_string": "export "
+  },
+  "tool_name": "Edit",
+  "tool_response": {
+    "interrupted": false
+  },
+  "tool_use_id": "toolu_01FixturePostEdit",
+  "traceId": "tr_fixture_0003",
+  "turnId": "urn_fixture_0003"
+}

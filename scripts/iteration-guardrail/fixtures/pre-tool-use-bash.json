@@ -1,0 +1,16 @@
+{
+  "_meta": "Runtime-derived fixture (review A5): reproduces the ZCode workspace-hook stdin envelope for PreToolUse on Bash, as serialized by the runtime's Claude-compatible hook-input builder (fields include the ones the guardrail does not consume). Purpose: CI parses this to catch contract drift from the live envelope. Derived from the runtime bundle's createClaudeCompatibleHookStdin, not yet live-captured in CI; replace with a redacted live capture when one is available.",
+  "agent_type": "implementer",
+  "cwd": "/home/user/project",
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "default",
+  "session_id": "sess_fixture_pretooluse",
+  "tool_input": {
+    "command": "bun run test",
+    "timeout": 120000
+  },
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_01FixturePreToolUse",
+  "traceId": "tr_fixture_0001",
+  "turnId": "urn_fixture_0001"
+}
