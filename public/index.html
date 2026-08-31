@@ -150,7 +150,13 @@
   ul.todos li.in_progress { color: var(--text); }
   .err { margin-top: 8px; font-size: 11px; color: #ffb3ae; }
   .ticker { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
-  .ticker .thead { padding: 8px 14px; background: var(--panel2); color: var(--dim); font-size: 11px; letter-spacing: 1px; }
+  .ticker .thead { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel2); color: var(--dim); font-size: 11px; letter-spacing: 1px; }
+  #tickerfilter {
+    margin-left: auto; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 10px; padding: 1px 6px;
+  }
+  .ticker li .act.okmark { color: var(--ok); }
+  .ticker li .act.errmark { color: var(--fail); font-weight: 700; }
   .ticker ul { list-style: none; margin: 0; padding: 8px 14px 10px; font-size: 12px; }
   .ticker li { display: flex; gap: 10px; padding: 1px 0; color: var(--dim); cursor: pointer; align-items: baseline; }
   .ticker li:hover { background: var(--panel2); }
@@ -229,8 +235,15 @@
     <div class="activebar" id="activebar"></div>
   </div>
   <div class="duo">
-    <div class="ticker">
-      <div class="thead">TOOL TICKER — latest calls across visible sessions</div>
+    <div class="ticker" id="tickerpanel">
+      <div class="thead">RECENT ACTIVITY — tool calls, errors and sessions across visible sessions
+        <select id="tickerfilter" title="filter the activity feed">
+          <option value="all">all</option>
+          <option value="tool">tools</option>
+          <option value="error">errors</option>
+          <option value="session">sessions</option>
+        </select>
+      </div>
       <ul id="ticker"></ul>
     </div>
     <div class="alert" id="alert">⚠ rate-limited / failed agent detected</div>

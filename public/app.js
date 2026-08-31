@@ -99,6 +99,7 @@ function currentActivity(s) {
 
 let prev = null;
 let filterProject = "all";
+let activityFilter = "all"; // recent-activity feed: all | tool | error | session
 let harnessById = new Map(); // harness id -> { id, label, emoji, hasStop }
 let flashId = null; // banner click → highlight this card until flashUntil
 let flashUntil = 0;
@@ -213,6 +214,12 @@ $("ticker").addEventListener("click", (e) => {
 
 $("filter").addEventListener("change", () => {
   filterProject = $("filter").value;
+  poll();
+});
+
+// recent-activity category filter
+$("tickerfilter").addEventListener("change", () => {
+  activityFilter = $("tickerfilter").value;
   poll();
 });
 
@@ -402,23 +409,58 @@ function render(state) {
     if (c) drawSpark(c, s.sparkline);
   }
 
-  // ticker with flash-on-new
-  const prevTicker = prev?.ticker ?? [];
-  const known = new Set(prevTicker.map((t) => t.at + t.tool));
-  $("ticker").innerHTML = state.ticker.map((t) => {
-    const isNew = !known.has(t.at + t.tool) && prevTicker.length > 0;
-    const agent = byId.get(t.sessionId);
-    // same tooltip vocabulary as the chips and FAILED rows: full project,
-    // role, instance and brief — plus what the tool call actually was
-    const tip = (agent ? fullLabel(agent) : t.sessionId) +
-      ` — ${prettyTool(t.tool)}` +
-      (t.status ? ` · ${t.status}` : "") +
-      (t.outputBytes != null ? ` · ${fmt(t.outputBytes)}B` : "");
-    const right = [t.outputBytes != null ? `${fmt(t.outputBytes)}B` : "", ago(t.at)].filter(Boolean).join(" · ");
-    return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="${esc(tip)}"><span class="l">${agent ? harnessMark(agent) + " " + roleIcon(agent) + " " + labelHtml(agent) : harnessMark(t.harness ?? t.sessionId) + " session"} <span class="act">${esc(prettyTool(t.tool))} ${t.status ?? ""}</span></span><span class="dash">-</span><span class="r">${esc(tagged(right, agent))}</span></li>`;
+  // recent-activity feed: tool calls + session errors + session starts,
+  // merged into one time-ordered stream. `activityFilter` narrows it to a
+  // category; flash-on-new keys on kind+at+text so only genuinely new rows
+  // animate, and rows jump to their card on click as before.
+  const feed = [];
+  for (const t of state.ticker) {
+    feed.push({ kind: "tool", at: t.at, t, agent: byId.get(t.sessionId) });
+  }
+  for (const s of state.sessions) {
+    if (s.status === "failed" && s.lastError) {
+      feed.push({ kind: "error", at: s.lastError.at ?? s.lastAt ?? 0, s });
+    }
+    feed.push({ kind: "session", at: s.firstAt ?? s.lastAt ?? 0, s });
+  }
+  feed.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  const shown = activityFilter === "all" ? feed : feed.filter((f) => f.kind === activityFilter);
+  const prevFeed = prev?.__feed ?? [];
+  const knownFeed = new Set(prevFeed.map((f) => f.kind + ":" + f.at + ":" + (f.t?.tool ?? f.s?.id)));
+  $("ticker").innerHTML = shown.slice(0, 40).map((f) => {
+    const isNew = !knownFeed.has(f.kind + ":" + f.at + ":" + (f.t?.tool ?? f.s?.id)) && prevFeed.length > 0;
+    let l, r, tip;
+    if (f.kind === "tool") {
+      const t = f.t, agent = f.agent;
+      // same tooltip vocabulary as the chips and FAILED rows: full project,
+      // role, instance and brief — plus what the tool call actually was
+      tip = (agent ? fullLabel(agent) : t.sessionId) +
+        ` — ${prettyTool(t.tool)}` +
+        (t.status ? ` · ${t.status}` : "") +
+        (t.outputBytes != null ? ` · ${fmt(t.outputBytes)}B` : "");
+      const err = t.status && t.status !== "completed" && t.status !== "running" && t.status !== "pending";
+      l = (agent ? harnessMark(agent) + " " + roleIcon(agent) + " " + labelHtml(agent) : harnessMark(t.harness ?? t.sessionId) + " session") +
+        ` <span class="act ${err ? "errmark" : "okmark"}">⚡ ${esc(prettyTool(t.tool))} ${t.status ?? ""}</span>`;
+      r = [t.outputBytes != null ? `${fmt(t.outputBytes)}B` : "", ago(t.at)].filter(Boolean).join(" · ");
+      return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="${esc(tip)}"><span class="l">${l}</span><span class="dash">-</span><span class="r">${esc(tagged(r, f.agent))}</span></li>`;
+    }
+    if (f.kind === "error") {
+      const s = f.s;
+      tip = fullLabel(s) + ` — ${humanType(s.lastError.type)}: ${s.lastError.message ?? ""}`;
+      l = harnessMark(s) + " " + roleIcon(s) + " " + labelHtml(s) +
+        ` <span class="act errmark">⚠ ${esc(humanType(s.lastError.type))}</span>`;
+      r = ago(f.at);
+      return `<li class="${isNew ? "new" : ""}" data-target="${esc(s.id)}" title="${esc(tip)}"><span class="l">${l}</span><span class="dash">-</span><span class="r">${esc(tagged(r, s))}</span></li>`;
+    }
+    const s = f.s;
+    tip = fullLabel(s) + ` — session started ${new Date(f.at).toLocaleString()}, now ${s.status}`;
+    l = harnessMark(s) + " " + roleIcon(s) + " " + labelHtml(s) +
+      ` <span class="act okmark">▶ started · ${esc(s.status)}</span>`;
+    r = ago(f.at);
+    return `<li class="${isNew ? "new" : ""}" data-target="${esc(s.id)}" title="${esc(tip)}"><span class="l">${l}</span><span class="dash">-</span><span class="r">${esc(tagged(r, s))}</span></li>`;
   }).join("");
-
   prev = state;
+  prev.__feed = feed;
 }
 
 async function poll() {
