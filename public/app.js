@@ -104,12 +104,15 @@ let flashId = null; // banner click → highlight this card until flashUntil
 let flashUntil = 0;
 const stoppedDirs = new Set(); // projects the user stopped this page-load
 
-function agentCard(s) {
+// showHarness: only for cards outside a marked section (the "other
+// sessions" bucket) — cards under a root inherit the root head's mark,
+// so repeating the letter on every subagent card is noise
+function agentCard(s, showHarness = true) {
   const name = s.role ?? (s.title ? "main" : "session");
   const sparkId = "spark-" + s.id;
   const modelHtml = [s.model, s.thinking && `[${s.thinking}]`].filter(Boolean).join(" ");
   // icon grammar everywhere: status dot → harness mark → role icon → name
-  const harnessBadge = harnessMark(s);
+  const harnessBadge = showHarness ? harnessMark(s) : "";
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
   const todoHtml = (s.todos ?? []).slice(0, 8).map((t) =>
@@ -379,12 +382,12 @@ function render(state) {
           ${harnessMark(root)}
           <span class="meta">${statsHtml(root)} · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
-        <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
+        <div class="kids">${kids.map((s) => agentCard(s, false)).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
       </div>`);
   }
   const orphans = state.sessions.filter((s) => !seen.has(s.id) && matches(s)).sort(byLast);
   if (orphans.length)
-    sections.push(`<div class="root"><div class="head"><span class="title">other sessions</span></div><div class="kids">${orphans.map(agentCard).join("")}</div></div>`);
+    sections.push(`<div class="root"><div class="head"><span class="title">other sessions</span></div><div class="kids">${orphans.map((s) => agentCard(s, true)).join("")}</div></div>`);
   $("tree").innerHTML = sections.join("");
 
   // re-apply the banner-jump highlight; re-renders would otherwise wipe it
