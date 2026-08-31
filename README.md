@@ -4,7 +4,7 @@ Live mission-control monitor for AI coding-agent harnesses — ZCode and [Hermes
 
 AgenQ reads (read-only) the telemetry harnesses already write on disk and turns it into a live board:
 
-![AgenQ mission control — sessions from ZCode and Hermes merged into one board ordered by project and time, every row carrying its harness letter mark (Z = zcode, H = hermes), tool ticker, failure alerts, and token-burn sparklines against the 200k context cliff](docs/screenshot.png)
+![AgenQ mission control — sessions from ZCode and Hermes merged into one board ordered by recency, every row carrying its harness letter mark (Z = zcode, H = hermes), a recent-activity feed (tool calls, errors, session starts) with a category filter capped at 20 rows, failure alerts, and token-burn sparklines against the 200k context cliff](docs/screenshot.png)
 
 - **One merged board** — sessions from every mounted harness mix in the same tree, ticker, Active Now strip and failure panel, ordered by project and then recency; only the small boxed-letter mark (Z / H, hover for the name) says which harness runs an agent — nothing else is separated
 - **Agent tree** — the manager session with every dispatched subagent under it (role, model, live status)
@@ -14,7 +14,7 @@ AgenQ reads (read-only) the telemetry harnesses already write on disk and turns 
 - **Live conversation** — the 💬 button on an Active Now row opens the session's full conversation in a new tab (user prompts, assistant replies, collapsed thinking, tool calls with status), streaming new messages as they happen; the header carries the harness mark too
 
 ![AgenQ live conversation — this README's own editing session, streaming](docs/screenshot-conversation.png)
-- **Tool ticker** — the latest tool calls across visible sessions
+- **Recent activity** — tool calls, session errors and session starts in one feed (capped at 20 rows), filterable by category
 - **Failure alerts** — rate limits and crashed agents turn red the moment they happen; a hollow dot means the process already exited
 
 ## Run it
