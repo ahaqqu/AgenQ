@@ -1,126 +1,6 @@
 // AgenQ front end — polls /api/state, diffs snapshots, renders the board.
-// Dependency-free on purpose; the fun layer is yours to restyle.
-const ROLE_EMOJI = {
-  "manager": "🧑‍✈️",
-  "senior-implementer": "🧠",
-  "implementer": "⚡",
-  "test-implementer": "🧪",
-  "reviewer": "🔍",
-  "thermo-nuclear-review-subagent": "🔥",
-  "thermo-nuclear-code-quality-review-subagent": "🧹",
-  "assistant-manager": "🔎",
-};
-const CTX_LIMIT = 200_000; // the cliff from the #94 analysis
-
-const $ = (id) => document.getElementById(id);
-let prev = null;
-
-function fmt(n) {
-  if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
-  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
-  return String(n);
-}
-function ago(ts) {
-  if (!ts) return "—";
-  const s = Math.max(0, (Date.now() - ts) / 1000);
-  if (s < 90) return Math.round(s) + "s ago";
-  if (s < 5400) return Math.round(s / 60) + "m ago";
-  return Math.round(s / 3600) + "h ago";
-}
-function agoLong(ts) {
-  if (!ts) return "—";
-  const m = Math.floor(Math.max(0, Date.now() - ts) / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return m + " minute" + (m === 1 ? "" : "s") + " ago";
-  const h = Math.floor(m / 60);
-  if (h < 24) return h + " hour" + (h === 1 ? "" : "s") + " ago";
-  const d = Math.floor(h / 24);
-  return d + " day" + (d === 1 ? "" : "s") + " ago";
-}
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-function drawSpark(canvas, series) {
-  const w = canvas.clientWidth || 300, h = canvas.clientHeight || 44;
-  canvas.width = w * devicePixelRatio; canvas.height = h * devicePixelRatio;
-  const ctx = canvas.getContext("2d");
-  ctx.scale(devicePixelRatio, devicePixelRatio);
-  ctx.clearRect(0, 0, w, h);
-  if (!series || series.length < 2) return;
-  // plot backdrop distinct from the card background (card = --bg)
-  const style = getComputedStyle(document.documentElement);
-  ctx.fillStyle = style.getPropertyValue("--panel").trim() || "#131824";
-  ctx.beginPath();
-  ctx.roundRect(0, 0, w, h, 4);
-  ctx.fill();
-  // y-scale always spans the context cliff so the 200k line (and what's
-  // under vs. over it) is readable even on quiet sessions
-  const max = Math.max(...series, CTX_LIMIT);
-  const step = w / (series.length - 1);
-  const yOf = (v) => h - (v / max) * (h - 4) - 2;
-  // area
-  ctx.beginPath();
-  ctx.moveTo(0, h);
-  series.forEach((v, i) => ctx.lineTo(i * step, yOf(v)));
-  ctx.lineTo(w, h);
-  ctx.closePath();
-  ctx.fillStyle = "rgba(110,168,254,.15)";
-  ctx.fill();
-  // line, turning red past the context cliff
-  const scaled = series.map(yOf);
-  ctx.beginPath();
-  series.forEach((v, i) => {
-    const x = i * step, y = scaled[i];
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = max > CTX_LIMIT ? "#e5534b" : "#6ea8fe";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  // cliff marker + label, always drawn now that the scale reaches 200k
-  {
-    const y = yOf(CTX_LIMIT);
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = "rgba(229,83,75,.5)";
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = "rgba(229,83,75,.8)";
-    ctx.font = "9px ui-monospace, monospace";
-    ctx.textAlign = "right";
-    ctx.fillText(fmt(CTX_LIMIT), w - 2, y - 2);
-  }
-  ctx.textAlign = "left";
-}
-
-function agentCard(s) {
-  const emoji = ROLE_EMOJI[s.role] ?? "🤖";
-  const name = s.role ?? (s.title ? "main" : "session");
-  const sparkId = "spark-" + s.id;
-  const modelHtml = [s.model, s.thinking && `[${s.thinking}]`].filter(Boolean).join(" ");
-  // a dead run's failure keeps its red dot but stops pulsing
-  const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
-  const todoHtml = (s.todos ?? []).slice(0, 8).map((t) =>
-    `<li class="${esc(t.status)}">${t.status === "done" ? "☑" : t.status === "in_progress" ? "▸" : "☐"} ${esc(t.content)}</li>`
-  ).join("");
-  return `
-  <div class="kid" id="kid-${s.id}">
-    <div class="row">
-      <span class="status ${esc(dot)}" title="${esc(s.status)}${s.live === false ? " · process exited" : ""}"></span>
-      <span>${emoji}</span>
-      <span class="name">${esc(name)}</span>
-      <span class="model">${esc(modelHtml)}</span>
-    </div>
-    ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
-    <div class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</div>
-    <div class="nums"><span class="stats">${statsHtml(s)}</span></div>
-    <canvas class="spark" id="${sparkId}" title="Token use per request. The dashed red line is the ${(CTX_LIMIT / 1000).toFixed(1)}k context cliff — past it the line turns red.&#10;x-axis: requests, oldest to newest (last 120, spaced by request order, not by time)&#10;y-axis: input tokens, 0 up to the ${(CTX_LIMIT / 1000).toFixed(1)}k cliff"></canvas>
-    ${todoHtml ? `<ul class="todos">${todoHtml}</ul>` : ""}
-    ${s.lastError ? `<div class="err">⚠ ${esc(humanType(s.lastError.type))}: ${esc(s.lastError.message ?? "")}${s.live === false ? " · run exited" : ""}</div>` : ""}
-    ${s.lastError && s.directory && stoppedDirs.has(s.directory) ? `<div class="stoppedmark">⏹ stopped by you — project run killed</div>` : ""}
-  </div>`;
-}
+// Dependency-free on purpose; visuals.js and detail.js carry the sparkline
+// renderer and the lazy detail panel. The fun layer is yours to restyle.
 
 const byLast = (a, b) => (b.lastAt ?? b.firstAt ?? 0) - (a.lastAt ?? a.firstAt ?? 0);
 
@@ -211,12 +91,6 @@ function statsHtml(s) {
     `ctx <b class="st ${ctxCls((s.maxContext ?? 0) / CTX_LIMIT)}">${fmt(s.maxContext)}</b>`;
 }
 
-// agent_failed → "Agent failed" — statuses are for the DB, people read prose
-const humanType = (t) => {
-  const s = String(t ?? "");
-  return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
-};
-
 function currentActivity(s) {
   const todo = (s.todos ?? []).find((t) => t.status === "in_progress");
   if (todo) return todo.content;
@@ -224,90 +98,43 @@ function currentActivity(s) {
   return "…";
 }
 
+let prev = null;
+// harness origin badges — hidden while only one harness is mounted so the
+// single-harness board looks exactly as before
+let multiHarness = false;
 let filterProject = "all";
 let flashId = null; // banner click → highlight this card until flashUntil
 let flashUntil = 0;
 const stoppedDirs = new Set(); // projects the user stopped this page-load
 
-// ----- expandable ACTIVE NOW rows (lazy per-session detail) -----
-let expandedId = null;
-const detailCache = new Map(); // id -> { data?, error?, fetchedAt }
-let detailInflight = false;
-
-async function fetchDetail(id, force = false) {
-  const c = detailCache.get(id);
-  if (!force && c && Date.now() - c.fetchedAt < 4000) return;
-  if (detailInflight) return;
-  detailInflight = true;
-  try {
-    const res = await fetch(`/api/session/${encodeURIComponent(id)}/detail`);
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    detailCache.set(id, { data: await res.json(), fetchedAt: Date.now() });
-  } catch (e) {
-    detailCache.set(id, { error: e.message, fetchedAt: Date.now() });
-  } finally {
-    detailInflight = false;
-  }
-  renderDetail(id);
-}
-
-function renderDetail(id) {
-  const el = document.getElementById("detail-" + id);
-  if (!el) return;
-  const sel = document.getSelection();
-  if (sel && !sel.isCollapsed) return; // same copy-protection as render()
-  el.innerHTML = detailHtml(detailCache.get(id));
-}
-
-function detailHtml(entry) {  if (!entry || (!entry.data && !entry.error)) return `<div class="dload">loading…</div>`;
-  if (entry.error) return `<div class="dload errtxt">detail unavailable — ${esc(entry.error)}</div>`;
-  const d = entry.data;
-  const out = [];
-
-  // what it is doing right now, with the actual arguments
-  if (d.currentTool) {
-    out.push(`<div class="dsec"><span class="dlab">now</span><span class="dval">` +
-      `<b>${esc(d.currentTool.name ?? "?")}</b> <span class="dim">(${esc(d.currentTool.status ?? "?")})</span>` +
-      (d.currentTool.input ? `<pre>${esc(d.currentTool.input)}</pre>` : "") + `</span></div>`);
-  } else {
-    out.push(`<div class="dsec"><span class="dlab">now</span><span class="dval dim">no tool call in flight</span></div>`);
-  }
-
-  if (d.thinking?.text)
-    out.push(`<div class="dsec"><span class="dlab">thinking</span><span class="dval"><pre class="think">${esc(d.thinking.text)}</pre></span></div>`);
-
-  const td = d.todos ?? [];
-  if (td.length) {
-    const done = td.filter((t) => t.status === "done").length;
-    const now = td.filter((t) => t.status === "in_progress").map((t) => t.content);
-    out.push(`<div class="dsec"><span class="dlab">todo</span><span class="dval">${done}/${td.length} done` +
-      (now.length ? ` · now: ${esc(now.join(" | "))}` : "") + `</span></div>`);
-  }
-
-  if (d.diff && (d.diff.additions != null || d.diff.files != null))
-    out.push(`<div class="dsec"><span class="dlab">diff</span><span class="dval">` +
-      `<span class="add">+${fmt(d.diff.additions ?? 0)}</span> <span class="del">−${fmt(d.diff.deletions ?? 0)}</span>` +
-      ` · ${d.diff.files ?? "?"} files</span></div>`);
-
-  const tk = d.tokens ?? {};
-  const win = d.modelWindow || 200_000;
-  const fill = tk.maxContext ? Math.round((tk.maxContext / win) * 100) : 0;
-  out.push(`<div class="dsec"><span class="dlab">context</span><span class="dval">` +
-    `<span class="bar"><span class="fill ${fill >= 90 ? "hot" : ""}" style="width:${Math.min(fill, 100)}%"></span></span>` +
-    `${fmt(tk.maxContext ?? 0)} / ${fmt(win)} (${fill}%)</span></div>`);
-
-  out.push(`<div class="dsec"><span class="dlab">tokens</span><span class="dval">` +
-    `<div class="trow">in ${fmt(tk.input ?? 0)} <span class="dim">(cache-read ${fmt(tk.cacheRead ?? 0)}, cache-write ${fmt(tk.cacheCreate ?? 0)})</span>` +
-    ` · out ${fmt(tk.output ?? 0)} <span class="dim">(reasoning ${fmt(tk.reasoning ?? 0)})</span> · reqs ${tk.requests ?? 0}</div>` +
-    (d.turns?.[0] ? `<div class="trow dim">latest turn: in ${fmt(d.turns[0].input_tokens)} / out ${fmt(d.turns[0].output_tokens)} / reasoning ${fmt(d.turns[0].reasoning_tokens)}</div>` : "") +
-    `</span></div>`);
-
-  if (d.errors?.length)
-    out.push(`<div class="dsec"><span class="dlab">errors</span><span class="dval">` +
-      d.errors.map((e) => `<div class="trow del">✗ ${esc(humanType(e.type))}: ${esc(e.message ?? "")} <span class="dim">${ago(e.at)}</span></div>`).join("") +
-      `</span></div>`);
-
-  return out.join("");
+function agentCard(s) {
+  const emoji = ROLE_EMOJI[s.role] ?? "🤖";
+  const name = s.role ?? (s.title ? "main" : "session");
+  const sparkId = "spark-" + s.id;
+  const modelHtml = [s.model, s.thinking && `[${s.thinking}]`].filter(Boolean).join(" ");
+  const harnessBadge = multiHarness ? `<span class="harness" title="harness: ${esc(s.harness ?? "")}">${esc(s.harness ?? "")}</span>` : "";
+  // a dead run's failure keeps its red dot but stops pulsing
+  const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
+  const todoHtml = (s.todos ?? []).slice(0, 8).map((t) =>
+    `<li class="${esc(t.status)}">${t.status === "done" ? "☑" : t.status === "in_progress" ? "▸" : "☐"} ${esc(t.content)}</li>`
+  ).join("");
+  return `
+  <div class="kid" id="kid-${s.id}">
+    <div class="row">
+      <span class="status ${esc(dot)}" title="${esc(s.status)}${s.live === false ? " · process exited" : ""}"></span>
+      <span>${emoji}</span>
+      <span class="name">${esc(name)}</span>
+      <span class="model">${esc(modelHtml)}</span>
+      ${harnessBadge}
+    </div>
+    ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
+    <div class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</div>
+    <div class="nums"><span class="stats">${statsHtml(s)}</span></div>
+    <canvas class="spark" id="${sparkId}" title="Token use per request. The dashed red line is the ${(CTX_LIMIT / 1000).toFixed(1)}k context cliff — past it the line turns red.&#10;x-axis: requests, oldest to newest (last 120, spaced by request order, not by time)&#10;y-axis: input tokens, 0 up to the ${(CTX_LIMIT / 1000).toFixed(1)}k cliff"></canvas>
+    ${todoHtml ? `<ul class="todos">${todoHtml}</ul>` : ""}
+    ${s.lastError ? `<div class="err">⚠ ${esc(humanType(s.lastError.type))}: ${esc(s.lastError.message ?? "")}${s.live === false ? " · run exited" : ""}</div>` : ""}
+    ${s.lastError && s.directory && stoppedDirs.has(s.directory) ? `<div class="stoppedmark">⏹ stopped by you — project run killed</div>` : ""}
+  </div>`;
 }
 
 // stop is a project action: every zcode-cli process in that directory is
@@ -436,6 +263,7 @@ function render(state) {
   if (selection && !selection.isCollapsed) return;
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
   computeInstances(state.sessions);
+  multiHarness = (state.harnesses?.length ?? 0) > 1;
 
   // project filter dropdown
   const projects = [...new Set(state.sessions.map((s) => s.project).filter(Boolean))].sort();
@@ -529,6 +357,7 @@ function render(state) {
           ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
           <span class="model">${esc([root.model, root.thinking && `[${root.thinking}]`].filter(Boolean).join(" "))}</span>
+          ${multiHarness ? `<span class="harness" title="harness: ${esc(root.harness ?? "")}">${esc(root.harness ?? "")}</span>` : ""}
           <span class="meta">${statsHtml(root)} · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
         <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
@@ -576,7 +405,7 @@ async function poll() {
     const res = await fetch("/api/state");
     const state = await res.json();
     render(state);
-    // keep the open detail panel fresh (fetchDetail throttles to 4s)
+    // keep the open detail panel fresh (fetchDetail throttles to DETAIL_TTL_MS)
     if (expandedId) fetchDetail(expandedId);
     $("poll").classList.remove("stale");
     $("poll-text").textContent = "live · " + new Date(state.generatedAt).toLocaleTimeString();

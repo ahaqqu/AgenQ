@@ -35,10 +35,11 @@
 // Environment overrides (used by tests): ZCODE_DB_PATH, ZCODE_AGENTS_DIR,
 // ZCODE_AGENT_USAGE_LOG.
 
-import { appendFileSync, closeSync, fsyncSync, openSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, unlinkSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { atomicWrite, emitEvent } from "../lib/hook-io.mjs";
 import {
   USAGE_ROWS_SQL,
   computeUsageTotals,
@@ -51,28 +52,8 @@ const DEFAULT_DB = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
 const DEFAULT_AGENTS_DIR = join(homedir(), ".zcode", "cli", "agents");
 const DEFAULT_LOG = join(homedir(), ".zcode", "cli", "agent-usage-metadata.log");
 
-const LOG_MAX_BYTES = 5 * 1024 * 1024;
-
 function emit(event, fields) {
-  const line = JSON.stringify({
-    time: new Date().toISOString(),
-    script: "agent-usage-metadata",
-    event,
-    ...fields,
-  });
-  process.stderr.write(`${line}\n`);
-  try {
-    const logPath = process.env.ZCODE_AGENT_USAGE_LOG || DEFAULT_LOG;
-    try {
-      const { size } = statSync(logPath);
-      if (size > LOG_MAX_BYTES) renameSync(logPath, `${logPath}.1`);
-    } catch {
-      // Missing log file is fine; appendFileSync creates it.
-    }
-    appendFileSync(logPath, `${line}\n`);
-  } catch {
-    // Sidecar logging is best-effort; stderr already carries the record.
-  }
+  emitEvent("agent-usage-metadata", event, fields, process.env.ZCODE_AGENT_USAGE_LOG || DEFAULT_LOG);
 }
 
 function readStdin() {
@@ -141,35 +122,6 @@ function queryUsageRows(dbPath, sessionId) {
     } catch {
       // Already closed.
     }
-  }
-}
-
-// Atomic replace: write the sibling temp file, fsync the file, rename over
-// the target, then fsync the directory so the rename itself is durable.
-function atomicWrite(filePath, content) {
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    const fd = openSync(tmp, "w");
-    try {
-      writeFileSync(fd, content);
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    renameSync(tmp, filePath);
-    const dir = openSync(dirname(filePath), "r");
-    try {
-      fsyncSync(dir);
-    } finally {
-      closeSync(dir);
-    }
-  } catch (e) {
-    try {
-      unlinkSync(tmp);
-    } catch {
-      // Nothing to clean up.
-    }
-    throw e;
   }
 }
 

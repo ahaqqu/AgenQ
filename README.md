@@ -49,7 +49,7 @@ ln -s "$(pwd)/monitor.mjs" ~/.local/bin/agenq
 
 Requires Linux, [Bun](https://bun.sh) ≥ 1.1 (the installer handles this — `curl` and `git` are the only prerequisites), and a machine where ZCode has been used (it reads ZCode's local telemetry). No dependencies, no build step, no DB writes — the DB is opened `mode=ro` per poll and the agents dir is only ever read.
 
-**The one exception:** the FAILED panel has a ⏹ *stop run* action, **at project level** — that is the real granularity of the mechanism, so it is the granularity of the button. ZCode runs each project's CLI session as `zcode-cli` processes working in the project directory; stop SIGTERMs all of them (the button and the confirm dialog say how many). Liveness comes from `/proc`, not the DB: a failure whose process is gone is shown dimmed as *run exited*, with no button. Stop asks for confirmation first, and the server binds `127.0.0.1` so it is unreachable from the network.
+**The one exception:** the FAILED panel has a ⏹ *stop run* action, **at project level** — that is the real granularity of the mechanism, so it is the granularity of the button. ZCode runs each project's CLI session as `zcode-cli` processes working in the project directory; stop SIGTERMs all of them (the button and the confirm dialog say how many). Liveness comes from `/proc`, not the DB: a failure whose process is gone is shown dimmed as *run exited*, with no button. Stop asks for confirmation first, rejects cross-origin requests, and the server binds `127.0.0.1` so it is unreachable from the network.
 
 Flags:
 
@@ -61,12 +61,14 @@ bun monitor.mjs --port 8787 --window-hours 12 \
 
 ## Where the data comes from
 
+AgenQ is harness-agnostic: any tool that runs AI coding sessions can appear on the board by mounting a **harness adapter**. ZCode is the first adapter; [Hermes](https://github.com/ahaqqu) or others plug in the same way — see [`harness/README.md`](harness/README.md) for the adapter contract. The registry namespaces every session id by harness (`zcode:sess_…`), merges all harnesses into one board, and routes the stop action to the harness that owns the target.
+
 | Source | Used for |
 |---|---|
 | `~/.zcode/cli/db/db.sqlite` (`model_usage`, `tool_usage`, `todo`, `session`) | token heartbeats, sparklines, tool ticker, todo lists, session titles |
 | `~/.zcode/cli/db/db.sqlite` (`part`, `model_usage`) — read lazily per click | the Active Now detail panel: tool arguments and thinking text (`part`), turn timings and the token breakdown (`model_usage`) |
 | `~/.zcode/cli/db/db.sqlite` (`message`, `part`) — read lazily per poll | the live conversation tab: message roles and sequence (`message`), text/reasoning/tool parts (`part`) |
-| `~/.zcode/cli/agents/<parent>/agent_*/metadata.json` | the manager→subagent tree, role profiles, status, failures |
+| `~/.zcode/cli/agents/<parent>/agent_*/metadata.json` | the manager→subagent tree, role profiles, status, failures (via the ZCode harness adapter) |
 
 Note: `session_task_link` in the DB belongs to ZCode's (currently unused) workflow framework — the real parent/child links live in the agents-dir metadata files, which is why the monitor joins both sources.
 
