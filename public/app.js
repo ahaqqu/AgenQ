@@ -109,7 +109,7 @@ function agentCard(s) {
   const sparkId = "spark-" + s.id;
   const modelHtml = [s.model, s.thinking && `[${s.thinking}]`].filter(Boolean).join(" ");
   // icon grammar everywhere: status dot → harness mark → role icon → name
-  const harnessBadge = harnessMark(s, true);
+  const harnessBadge = harnessMark(s);
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
   const todoHtml = (s.todos ?? []).slice(0, 8).map((t) =>
@@ -371,12 +371,12 @@ function render(state) {
       <div class="root" id="root-${esc(root.id)}">
         <div class="head">
           <span class="status ${esc(root.status === "failed" && root.live === false ? "exited" : root.status)}" title="${esc(root.status)}${root.live === false ? " · process exited" : ""}"></span>
-          ${harnessMark(root, true)}
+          ${harnessMark(root)}
           <span>🧑‍✈️</span>
           ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
           <span class="model">${esc([root.model, root.thinking && `[${root.thinking}]`].filter(Boolean).join(" "))}</span>
-          ${harnessMark(root, true)}
+          ${harnessMark(root)}
           <span class="meta">${statsHtml(root)} · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
         <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
