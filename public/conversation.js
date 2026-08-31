@@ -68,12 +68,11 @@ async function poll() {
     if (d.error) throw new Error(d.error);
     if (d.title) {
       // prefix = owning harness (zcode:sess_x / hermes:7) — mark it so a
-      // conversation tab is identifiable independent of the board. The board
-      // page loads visuals.js; this page loads it too (see conversation.html)
-      // so HARNESS_EMOJI here is the shared map, not a local copy.
+      // conversation tab is identifiable independent of the board. The
+      // letter matches the board's harness marks (first letter, uppercased).
       const h = id.includes(":") ? id.split(":")[0] : null;
       document.getElementById("title").textContent =
-        (h ? `${HARNESS_EMOJI[h] ?? "🔗"} [${h}] ` : "") + d.title;
+        (h ? `[${h.charAt(0).toUpperCase()}] ` : "") + d.title;
       document.title = d.title + " — AgenQ live";
     }
     if (d.items?.length) {

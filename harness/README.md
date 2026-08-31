@@ -19,7 +19,7 @@ An adapter is one directory exporting a single default object from
 export default {
   id: "zcode",                    // unique, stable; becomes the session-id prefix
   label: "ZCode",                 // shown in the UI origin badge
-  emoji: "🦓",                    // compact origin mark on every board item
+  letter: "Z",                    // origin letter shown on every board item (optional; first letter of id is the default)
   hasStop: true,                  // does stopRun() exist for this harness?
 
   // One poll's full board data for this harness. Must return the shape in
@@ -89,9 +89,9 @@ registry only namespaces them.
    against that harness's telemetry (SQLite, JSONL, whatever it leaves on
    disk). Give it its own `config.mjs` for flags and defaults, mirroring
    `harness/zcode/config.mjs` — `windowHours` and any `--<harness>-…` paths.
-   Pick an `emoji` for the origin marks — the board renders it from the
-   `harnesses[]` payload; the `HARNESS_EMOJI` map in `public/visuals.js`
-   is only the fallback for the moment before the first snapshot.
+   The board derives each origin mark (boxed letter, e.g. `Z`, `H`) from the
+   harness id automatically — nothing to configure; the contract's optional
+   `letter` field can override it.
 2. Register it in `harness/index.mjs`.
 3. If it has a stop action, implement `stopRun` and set `hasStop: true`.
 

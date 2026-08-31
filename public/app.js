@@ -105,10 +105,10 @@ let flashUntil = 0;
 const stoppedDirs = new Set(); // projects the user stopped this page-load
 
 function agentCard(s) {
-  const emoji = ROLE_EMOJI[s.role] ?? "🤖";
   const name = s.role ?? (s.title ? "main" : "session");
   const sparkId = "spark-" + s.id;
   const modelHtml = [s.model, s.thinking && `[${s.thinking}]`].filter(Boolean).join(" ");
+  // icon grammar everywhere: status dot → harness mark → role icon → name
   const harnessBadge = harnessMark(s, true);
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
@@ -119,10 +119,10 @@ function agentCard(s) {
   <div class="kid" id="kid-${s.id}">
     <div class="row">
       <span class="status ${esc(dot)}" title="${esc(s.status)}${s.live === false ? " · process exited" : ""}"></span>
-      <span>${emoji}</span>
+      ${harnessBadge}
+      <span>${roleIcon(s)}</span>
       <span class="name">${esc(name)}</span>
       <span class="model">${esc(modelHtml)}</span>
-      ${harnessBadge}
     </div>
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
     <div class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</div>
@@ -253,7 +253,7 @@ $("legend").innerHTML = `
     <div class="lrow"><span class="ic">🤖</span> other subagent role</div>
     <div class="lrow"><span class="ic">💤</span> idle 5m+ but process still alive</div>
     <div class="lrow"><span class="ic">⚠</span> last error of that agent</div>
-    <div class="lrow"><span class="ic" id="legend-harness">🔗</span> harness mark — every row shows which harness runs the agent (<span id="legend-harnesses"></span>)</div>
+    <div class="lrow"><span class="ic hmark">Z</span> harness mark — every row shows which harness runs the agent (<span id="legend-harnesses"></span>)</div>
     <div class="lrow"><span class="ic">⏹</span> kill process — stops every live process of that project run (the whole run stops)</div>
   </div>`;
 
@@ -263,7 +263,7 @@ function renderLegendHarnesses(harnesses) {
   const row = $("legend-harnesses");
   if (!row) return;
   row.innerHTML = (harnesses ?? []).map((h) =>
-    `<span title="harness: ${esc(h.id)}">${esc(h.emoji ?? HARNESS_EMOJI[h.id] ?? "🔗")} ${esc(h.label)}</span>`
+    `<span title="harness: ${esc(h.id)}"><span class="hmark">${esc(h.id.charAt(0).toUpperCase())}</span> ${esc(h.label)}</span>`
   ).join(" · ") || "none mounted";
 }
 
@@ -342,23 +342,25 @@ function render(state) {
   const actives = state.sessions.filter((s) => s.status === "running" && matches(s) && !stoppedDirs.has(s.directory)).sort(byLast);
   $("activewrap").style.display = actives.length ? "block" : "none";
   $("activebar").innerHTML = actives.map((s) => {
-    const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";
     const doing = currentActivity(s);
     const st = s.lastTool?.status && doing === s.lastTool.name ? ` ${s.lastTool.status}` : "";
     const open = expandedId === s.id;
     return `<div class="chip ${open ? "open" : ""}" data-session="${esc(s.id)}">` +
       `<button class="convbtn" data-conv="${esc(s.id)}" title="open the live conversation in a new tab">💬 live</button>` +
-      `<span class="status running"></span><span>${emoji}</span>${harnessMark(s)}` +
+      `<span class="status running"></span>${harnessMark(s)}<span>${roleIcon(s)}</span>` +
       `<span class="l" title="${esc(fullLabel(s))}">${labelHtml(s)} <span class="act" title="${esc(doing)}">${esc(doing + st)}</span></span>` +
       `<span class="dash">-</span>` +
       `<span class="r">${instTag(s) ? esc(instTag(s)) + " · " : ""}${statsHtml(s)} · ${ago(s.lastAt)}</span></div>` +
       (open ? `<div class="chipdetail" id="detail-${esc(s.id)}">${detailHtml(detailCache.get(s.id))}</div>` : "");
   }).join("");
 
-  // tree — newest roots first, children newest first
+  // tree — sections grouped by project (alphabetical), then newest first
+  // within a project; children newest first inside each section
+  const byProject = (a, b) =>
+    (a.project ?? "~none").localeCompare(b.project ?? "~none") || byLast(a, b);
   const seen = new Set();
   const sections = [];
-  const rootNodes = state.roots.map((rid) => byId.get(rid)).filter(Boolean).sort(byLast);
+  const rootNodes = state.roots.map((rid) => byId.get(rid)).filter(Boolean).sort(byProject);
   for (const root of rootNodes) {
     if (!root) continue;
     if (!matches(root)) continue;
@@ -369,6 +371,7 @@ function render(state) {
       <div class="root" id="root-${esc(root.id)}">
         <div class="head">
           <span class="status ${esc(root.status === "failed" && root.live === false ? "exited" : root.status)}" title="${esc(root.status)}${root.live === false ? " · process exited" : ""}"></span>
+          ${harnessMark(root, true)}
           <span>🧑‍✈️</span>
           ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
