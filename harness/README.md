@@ -2,7 +2,7 @@
 
 AgenQ is harness-agnostic: any tool that runs AI coding sessions and leaves
 telemetry on disk can appear on the board. A **harness adapter** teaches the
-monitor how one such tool — ZCode today, Hermes next — exposes:
+monitor how one such tool — ZCode and Hermes today — exposes:
 
 1. a **state snapshot**: every session, its tokens, status, todos, errors and
    its place in the manager→subagent tree (poll, ~1.5s cadence),
@@ -75,14 +75,18 @@ core, not the adapter — an adapter does not invent its own totals.
 - **Fail empty, never fail the poll.** A harness that isn't installed is not
   an error.
 
-## Adding a harness (e.g. Hermes)
+## Adding a harness
 
-1. `mkdir harness/hermes`, write `index.mjs` implementing the contract above
-   against Hermes's telemetry (SQLite, JSONL, whatever it leaves on disk).
-   Give it its own `config.mjs` for flags and defaults, mirroring
-   `harness/zcode/config.mjs`.
+1. `mkdir harness/<id>`, write `index.mjs` implementing the contract above
+   against that harness's telemetry (SQLite, JSONL, whatever it leaves on
+   disk). Give it its own `config.mjs` for flags and defaults, mirroring
+   `harness/zcode/config.mjs` — `windowHours` and any `--<harness>-…` paths.
 2. Register it in `harness/index.mjs`.
 3. If it has a stop action, implement `stopRun` and set `hasStop: true`.
 
 The frontend needs no changes: origin badges render automatically once two
-harnesses are mounted.
+harnesses are mounted. `harness/hermes/` is a working second reference — a
+single-session SQLite (`~/.hermes/state.db`), no stop action.
+
+The AGENTS.md review workflow gates every PR on a browser smoke test of the
+running board (see the repo root AGENTS.md).

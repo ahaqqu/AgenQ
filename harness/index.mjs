@@ -10,10 +10,9 @@
 // The server (monitor.mjs) talks ONLY to this module; an adapter talks only
 // to its own telemetry.
 import zcode from "./zcode/index.mjs";
+import hermes from "./hermes/index.mjs";
 
-// eslint-disable-next-line no-unused-vars -- future harnesses mount here:
-// import hermes from "./hermes/index.mjs";
-const ADAPTERS = [zcode];
+const ADAPTERS = [zcode, hermes];
 
 const byId = new Map(ADAPTERS.map((a) => [a.id, a]));
 
