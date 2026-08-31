@@ -2,7 +2,7 @@
 /**
  * AgenQ — live mission-control monitor for AI coding-agent sessions.
  *
- * Harness-agnostic core: every supported harness (ZCode today, Hermes next)
+ * Harness-agnostic core: every supported harness (ZCode and Hermes today)
  * mounts as an adapter in harness/index.mjs and teaches the monitor where its
  * telemetry lives and how to read it. This file knows nothing about any
  * specific harness — it is pure HTTP plumbing over the registry:

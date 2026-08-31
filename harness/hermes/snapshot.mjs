@@ -2,68 +2,70 @@
 // telemetry. Reads the state DB (read-only, fresh connection per poll) and
 // folds sessions, per-task usage, todos, tool calls and errors into one
 // JSON-able snapshot. Pure-ish: no server, no sockets.
-import { Database } from "bun:sqlite";
 import { cfg, WINDOW_MS } from "./config.mjs";
+import { roDb, rows, s2ms, projectFromDir, keepInWindow } from "../lib.mjs";
+import { toolResult } from "./toolresult.mjs";
 
-function roDb() {
-  // Fresh read-only connection per poll: long-lived WAL readers get
-  // invalidated by checkpoints, per-poll connections don't. A DB that
-  // isn't there (Hermes never ran on this machine) returns null and the
-  // adapter returns the empty shape instead of crashing the server.
-  try {
-    return new Database(cfg.db, { readonly: true });
-  } catch {
-    return null;
-  }
-}
-
-function rows(db, sql, params = []) {
-  if (!db) return [];
-  return db.prepare(sql).all(...params);
-}
-
+// Schema handling mirrors zcode's real policy: a DB that isn't there (or has
+// no sessions table — not installed, or a foreign SQLite in the path) fails
+// empty; unexpected query errors on an installed harness THROW so the
+// registry surfaces them as user-visible board warnings.
+// A table that only sometimes exists (hermes builds drift) degrades to [].
 function gatherDb() {
-  const db = roDb();
+  const db = roDb(cfg.db);
+  if (!db) return { sessions: [], usage: [], tools: [], todos: [] };
   try {
-    // A DB missing the expected tables (old hermes build, foreign SQLite in
-    // the path) degrades to fewer rows, never an error — same rule as
-    // zcode's: fail empty, never fail the poll.
-    const q = (sql) => {
+    let tables;
+    try {
+      tables = new Set(
+        rows(db, `SELECT name FROM sqlite_master WHERE type = 'table'`).map((r) => r.name),
+      );
+    } catch {
+      return { sessions: [], usage: [], tools: [], todos: [] };
+    }
+    if (!tables.has("sessions")) return { sessions: [], usage: [], tools: [], todos: [] };
+
+    const run = (name, sql) => {
+      try {
+        return rows(db, sql);
+      } catch (e) {
+        throw new Error(`query ${name}: ${e.message}`);
+      }
+    };
+    const optional = (sql) => {
       try {
         return rows(db, sql);
       } catch {
-        return [];
+        return []; // older builds may lack this table
       }
     };
 
-    const sessions = q(`
+    const sessions = run("sessions", `
       SELECT id, title, display_name, parent_session_id, model, cwd, model_config,
-             started_at, ended_at, end_reason, last_activity_at,
-             message_count, api_call_count,
+             started_at, ended_at, last_activity_at, api_call_count,
              input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-             reasoning_tokens, handoff_error, compression_failure_error,
-             archived, hidden
+             handoff_error, compression_failure_error, archived, hidden
       FROM sessions`);
 
     // Per-task API usage: the main task row (task = '') carries the
     // conversation's totals; housekeeping tasks (title_generation,
     // background_review, approval) still burned API calls and are kept as
     // extra sparkline points. Ordered by first_seen for request-order series.
-    const usage = q(`
-      SELECT session_id, task, api_call_count, input_tokens, output_tokens,
-             reasoning_tokens, last_seen
+    const usage = optional(`
+      SELECT session_id, task, api_call_count, input_tokens, output_tokens, last_seen
       FROM session_model_usage ORDER BY first_seen`);
 
-    const tools = q(`
-      SELECT session_id, role, tool_name, tool_call_id, tool_calls, content,
-             finish_reason, timestamp, active
-      FROM messages
-      WHERE role IN ('assistant', 'tool') AND tool_name IS NOT NULL
+    // Soft-archived transcript rows (active = 0) are taken-back turns —
+    // hermes's rewind/undo and compaction keep them on disk deliberately;
+    // they must not resurrect as recent activity.
+    const tools = optional(`
+      SELECT session_id, tool_name, content, timestamp FROM messages
+      WHERE role = 'tool' AND tool_name IS NOT NULL AND active = 1
       ORDER BY timestamp DESC LIMIT 60`);
 
-    const todos = q(`
+    const todos = optional(`
       SELECT session_id, content, timestamp FROM messages
-      WHERE role = 'tool' AND tool_name = 'todo'
+      WHERE role = 'tool' AND tool_name = 'todo' AND active = 1
       ORDER BY timestamp DESC LIMIT 40`);
 
     return { sessions, usage, tools, todos };
@@ -77,10 +79,8 @@ function gatherDb() {
 const SPARK_TAIL = 120; // sparkline points per agent
 export const ACTIVE_MS = 5 * 60_000; // heartbeat within this = active; idle past it = sleep
 
-const s2ms = (t) => (t == null ? null : Math.round(Number(t) * 1000));
-
 // thinking level of a session's latest model config; hermes stores it in
-// model_config.reasoning_config (enabled + effort), "" = disabled
+// model_config.reasoning_config (enabled + effort)
 function thinkingOf(modelConfig) {
   try {
     const rc = JSON.parse(modelConfig ?? "{}")?.reasoning_config;
@@ -104,21 +104,6 @@ const childKind = (modelConfig) => {
   return null;
 };
 
-// tool results are JSON objects ({output, exit_code, error, success, …});
-// a parse failure or error/success flag decides the status word the same
-// way the zcode adapter's statuses read
-function toolStatus(content) {
-  try {
-    const d = JSON.parse(content);
-    if (d && (d.error != null || d.success === false)) return "error";
-  } catch {
-    // non-JSON result bodies still completed
-  }
-  return "completed";
-}
-
-const todoStatus = (st) => (st === "completed" ? "done" : String(st ?? "pending"));
-
 function assemble({ sessions, usage, tools, todos, now }) {
   const cutoff = now - WINDOW_MS;
 
@@ -128,32 +113,35 @@ function assemble({ sessions, usage, tools, todos, now }) {
     usageBySession.get(u.session_id).push(u);
   }
 
-  // latest todo list per session
+  // latest todo list per session (rows come newest first)
   const todosBySession = new Map();
   for (const t of todos) {
-    if (todosBySession.has(t.session_id)) continue; // rows come newest first
+    if (todosBySession.has(t.session_id)) continue;
     try {
       const list = JSON.parse(t.content)?.todos;
       if (Array.isArray(list)) {
         todosBySession.set(
           t.session_id,
-          list.map((x) => ({ content: String(x.content ?? ""), status: todoStatus(x.status) })),
+          list.map((x) => ({
+            content: String(x.content ?? ""),
+            status: x.status === "completed" ? "done" : String(x.status ?? "pending"),
+          })),
         );
       }
     } catch { /* malformed todo payload — skip */ }
   }
 
-  // most recent tool call per session (tool result rows only — the result
-  // proves the call ran, and its JSON carries the error state)
+  // most recent tool call per session: from tool *result* rows (a result
+  // proves the call ran; its JSON carries the error state and exit code)
   const toolBySession = new Map();
   const ticker = [];
   for (const t of tools) {
-    if (t.role !== "tool" || !t.tool_name) continue;
+    const { status, exitCode } = toolResult(t.content);
     if (!toolBySession.has(t.session_id)) {
       toolBySession.set(t.session_id, {
         name: t.tool_name,
         outputBytes: t.content ? t.content.length : null,
-        status: toolStatus(t.content),
+        status,
         at: s2ms(t.timestamp),
       });
     }
@@ -161,10 +149,8 @@ function assemble({ sessions, usage, tools, todos, now }) {
       sessionId: t.session_id,
       tool: t.tool_name,
       outputBytes: t.content ? t.content.length : null,
-      status: toolStatus(t.content),
-      exitCode: (() => {
-        try { return JSON.parse(t.content)?.exit_code ?? null; } catch { return null; }
-      })(),
+      status,
+      exitCode,
       at: s2ms(t.timestamp),
     });
   }
@@ -173,40 +159,40 @@ function assemble({ sessions, usage, tools, todos, now }) {
   for (const s of sessions) {
     if (s.archived || s.hidden) continue;
     const kind = childKind(s.model_config);
-    const subagent = kind === "delegate";
     const directory = s.cwd ?? null;
-    const project = directory ? (directory.split("/").filter(Boolean).pop() ?? null) : null;
     const ended = s.ended_at != null;
+    const tasks = usageBySession.get(s.id) ?? [];
 
-    // hermes reports usage per task, not per API call; the sparkline plots
-    // each task's average input per call (the request-size signal the board
-    // is for), clamped to the tail
+    // Sparkline = input tokens per request (the board-wide meaning). Hermes
+    // reports cumulative per-task sums, so each task contributes its
+    // per-call average as `min(n, room left)` plateau points — never an
+    // unbounded expansion of the cumulative count (a long session would
+    // allocate millions of slots and the Math.max spread would throw).
     const sparkline = [];
-    for (const u of usageBySession.get(s.id) ?? []) {
+    let maxAvg = 0;
+    for (const u of tasks) {
       const n = Math.max(Number(u.api_call_count ?? 0), 0);
-      if (n > 0) {
-        const avg = Math.round(Number(u.input_tokens ?? 0) / n);
-        for (let i = 0; i < n; i++) sparkline.push(avg);
-      }
+      if (n <= 0) continue;
+      const avg = Math.round(Number(u.input_tokens ?? 0) / n);
+      if (avg > maxAvg) maxAvg = avg;
+      const take = Math.min(n, Math.max(SPARK_TAIL - sparkline.length, 0));
+      for (let i = 0; i < take; i++) sparkline.push(avg);
     }
 
     const firstAt = s2ms(s.started_at) ?? 0;
     const lastAt = Math.max(s2ms(s.last_activity_at) ?? 0, firstAt);
-    const errors = [];
-    if (s.handoff_error) errors.push(s.handoff_error);
-    if (s.compression_failure_error) errors.push(s.compression_failure_error);
+    const errMsg = s.handoff_error ?? s.compression_failure_error ?? null;
 
     // status: failure > finished > activity recency. `live` stays null —
     // hermes sessions live inside shared backend processes (gateway,
     // tui-gateway) whose per-session liveness is not readable anywhere
     // AgenQ trusts, so the adapter makes no claim (no exit dimming).
     const status = (() => {
-      if (errors.length) return "failed";
+      if (errMsg) return "failed";
       if (ended) return "done";
-      const lastSeen = s2ms(
-        (usageBySession.get(s.id) ?? []).reduce((m, u) => Math.max(m, Number(u.last_seen ?? 0)), 0),
-      );
-      if (lastSeen && now - lastSeen <= ACTIVE_MS) return "running";
+      const lastSeen = Math.max(0, ...tasks.map((u) => Number(u.last_seen ?? 0)));
+      const lastSeenMs = s2ms(lastSeen) ?? 0;
+      if (lastSeenMs && now - lastSeenMs <= ACTIVE_MS) return "running";
       if (lastAt && now - lastAt <= ACTIVE_MS) return "running";
       return "sleep";
     })();
@@ -215,9 +201,11 @@ function assemble({ sessions, usage, tools, todos, now }) {
       id: s.id,
       title: s.title ?? (s.display_name ? String(s.display_name) : null),
       parentId: s.parent_session_id ?? null,
-      project,
+      project: projectFromDir(directory),
       directory,
-      role: subagent ? "subagent" : null,
+      // only delegate subagents are a different agent; branch/reset children
+      // are continuations of the same conversation, not separate workers
+      role: kind === "delegate" ? "subagent" : null,
       model: s.model ?? null,
       thinking: thinkingOf(s.model_config),
       status,
@@ -226,12 +214,15 @@ function assemble({ sessions, usage, tools, todos, now }) {
       outputTokens: Number(s.output_tokens ?? 0),
       cacheRead: Number(s.cache_read_tokens ?? 0),
       cacheCreate: Number(s.cache_write_tokens ?? 0),
-      maxContext: Math.max(0, ...sparkline),
+      // hermes reports no per-request peak; the closest is the biggest
+      // single-request average across tasks (task totals would measure the
+      // whole conversation, not one request against the context cliff)
+      maxContext: maxAvg,
       firstAt,
       lastAt,
-      sparkline: sparkline.slice(-SPARK_TAIL),
-      lastError: errors.length
-        ? { type: "handoff_failed", message: String(errors[0]), at: lastAt }
+      sparkline,
+      lastError: errMsg
+        ? { type: "handoff_failed", message: String(errMsg), at: lastAt }
         : null,
       todos: todosBySession.get(s.id) ?? [],
       lastTool: toolBySession.get(s.id) ?? null,
@@ -239,34 +230,30 @@ function assemble({ sessions, usage, tools, todos, now }) {
     });
   }
 
-  // tree edges + the two-pass keep rule: keep sessions with a heartbeat in
-  // the window, then any ancestor of a kept session (a parent whose own
-  // row is windowed out still anchors its subtree)
-  const keep = new Set();
+  // manager→subagent tree edges: children know their parentId; wire them
+  // into the parent (delegate-kind only — branch/reset children are the
+  // same conversation, not separate workers). The registry namespaces the
+  // ids afterwards; here everything is raw.
   for (const s of all.values()) {
-    if (Math.max(s.lastAt ?? 0, s.firstAt ?? 0) >= cutoff) {
-      keep.add(s.id);
-      let p = s.parentId;
-      while (p && !keep.has(p)) {
-        keep.add(p);
-        p = all.get(p)?.parentId ?? null;
-      }
-    }
+    if (s.role !== "subagent") continue;
+    const parent = s.parentId && all.get(s.parentId);
+    if (parent) parent.children.push(s.id);
   }
+
+  // keep recent sessions plus any ancestor of a kept session
+  const keep = keepInWindow([...all.values()], cutoff);
 
   const sessionsOut = [...all.values()]
     .filter((s) => keep.has(s.id))
     .map((s) => ({ ...s, children: s.children.filter((c) => keep.has(c)) }));
   const byId = new Map(sessionsOut.map((s) => [s.id, s]));
 
-  const tickerKept = ticker
-    .filter((t) => keep.has(t.sessionId))
-    .slice(0, 15)
-    .map((t) => ({ ...t, sessionId: t.sessionId }));
+  const tickerKept = ticker.filter((t) => keep.has(t.sessionId)).slice(0, 15);
 
+  // generatedAt/windowHours/roots are derived by the core (harness/index.mjs);
+  // the adapter only supplies what the core cannot compute: raw sessions in
+  // its own id space, plus the richer per-harness tool ticker.
   return {
-    generatedAt: now,
-    windowHours: cfg.windowHours,
     sessions: sessionsOut,
     roots: sessionsOut.filter((s) => !s.parentId || !byId.has(s.parentId)).map((s) => s.id),
     ticker: tickerKept,

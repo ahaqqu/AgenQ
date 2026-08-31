@@ -6,10 +6,7 @@ import { homedir } from "node:os";
 export function parseArgs(argv) {
   const out = {
     windowHours: 12,
-    // hermes keeps everything in ~/.hermes: the session DB plus runtime
-    // state under hermesHome (gateway lifecycle, delegation transcripts)
     db: join(homedir(), ".hermes", "state.db"),
-    hermesHome: join(homedir(), ".hermes"),
   };
   const take = (flag) => {
     const i = argv.indexOf(flag);
@@ -17,7 +14,6 @@ export function parseArgs(argv) {
   };
   out.windowHours = Number(take("--window-hours") ?? out.windowHours);
   out.db = take("--hermes-db") ?? out.db;
-  out.hermesHome = take("--hermes-home") ?? out.hermesHome;
   return out;
 }
 

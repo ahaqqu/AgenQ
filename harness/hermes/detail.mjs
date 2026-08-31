@@ -2,51 +2,14 @@
 // thinking, token breakdowns) and the live-conversation feed. Both open
 // their own read-only DB connection and are only hit when the UI asks for a
 // specific session.
-import { Database } from "bun:sqlite";
 import { cfg } from "./config.mjs";
-
-function roDb() {
-  try {
-    return new Database(cfg.db, { readonly: true });
-  } catch {
-    return null;
-  }
-}
-
-function rows(db, sql, params = []) {
-  if (!db) return [];
-  return db.prepare(sql).all(...params);
-}
-
-const s2ms = (t) => (t == null ? null : Math.round(Number(t) * 1000));
-
-const tail = (s, n) => { s = String(s ?? ""); return s.length > n ? "…" + s.slice(-n) : s; };
-const head = (s, n) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n) + " …" : s; };
-
-const toolErrored = (content) => {
-  try {
-    const d = JSON.parse(content);
-    return d != null && typeof d === "object" && (d.error != null || d.success === false);
-  } catch {
-    return false;
-  }
-};
-
-// Context-window estimates for the fill gauge — hermes sets max_tokens and
-// reasoning effort per session but reports no window size; the same
-// model-name table the zcode adapter uses is the best signal available
-// (unmatched → the 200k default both adapters share).
-const MODEL_WINDOWS = [
-  [/glm/i, 200_000],
-  [/kimi/i, 256_000],
-  [/deepseek/i, 128_000],
-];
-const modelWindow = (model) => MODEL_WINDOWS.find(([re]) => re.test(model ?? ""))?.[1] ?? 200_000;
+import { roDb, rows, s2ms, modelWindow, tail, head } from "../lib.mjs";
+import { toolResult } from "./toolresult.mjs";
 
 // ---------- per-session detail (lazy — only read when the UI expands a row) ----------
 
 export function sessionDetail(id) {
-  const db = roDb();
+  const db = roDb(cfg.db);
   try {
     const q = (sql, params = []) => {
       try { return rows(db, sql, params); } catch { return []; }
@@ -59,7 +22,7 @@ export function sessionDetail(id) {
     // tool_call_id (arguments live on the request side in hermes)
     let currentTool = null;
     const tr = q(`SELECT tool_name, tool_call_id, content, timestamp FROM messages
-                  WHERE session_id = ? AND role = 'tool' AND tool_name IS NOT NULL
+                  WHERE session_id = ? AND role = 'tool' AND tool_name IS NOT NULL AND active = 1
                   ORDER BY timestamp DESC LIMIT 1`, [id])[0];
     if (tr) {
       let input = null;
@@ -81,7 +44,7 @@ export function sessionDetail(id) {
       }
       currentTool = {
         name: tr.tool_name,
-        status: toolErrored(tr.content) ? "error" : "completed",
+        status: toolResult(tr.content).status,
         input: input ? head(input, 800) : null,
         at: s2ms(tr.timestamp),
       };
@@ -90,7 +53,7 @@ export function sessionDetail(id) {
     // newest thinking excerpt — tail only, the beginning is the stale half
     let thinking = null;
     const rp = q(`SELECT reasoning, reasoning_content, timestamp FROM messages
-                  WHERE session_id = ?
+                  WHERE session_id = ? AND active = 1
                     AND (reasoning IS NOT NULL AND reasoning != ''
                       OR reasoning_content IS NOT NULL AND reasoning_content != '')
                   ORDER BY timestamp DESC LIMIT 1`, [id])[0];
@@ -100,7 +63,10 @@ export function sessionDetail(id) {
     }
 
     // hermes reports usage per task (main + title/approval/review side
-    // tasks), not per turn; the panel sums them and shows no turn timings
+    // tasks), not per turn; the panel sums them and shows no turn timings.
+    // Context fill measures one request against the model window, so the
+    // gauge uses the biggest per-call average — task *totals* would plot
+    // the whole conversation against one request's cliff.
     const usage = q(`SELECT task, api_call_count, input_tokens, output_tokens, reasoning_tokens,
                             cache_read_tokens, cache_write_tokens
                      FROM session_model_usage WHERE session_id = ?`, [id]);
@@ -115,7 +81,10 @@ export function sessionDetail(id) {
       }),
       { requests: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheCreate: 0 },
     );
-    const maxContext = usage.reduce((m, u) => Math.max(m, Number(u.input_tokens ?? 0)), 0);
+    const maxContext = usage.reduce((m, u) => {
+      const n = Number(u.api_call_count ?? 0);
+      return n > 0 ? Math.max(m, Math.round(Number(u.input_tokens ?? 0) / n)) : m;
+    }, 0);
 
     const sessRow = q(`SELECT handoff_error, compression_failure_error, ended_at
                        FROM sessions WHERE id = ?`, [id])[0];
@@ -154,99 +123,127 @@ const CONV_THINK_CAP = 6_000;
 const CONV_INPUT_CAP = 2_000;
 const CONV_TAIL_ROWS = 400; // first load: the last N rows, not the whole session
 
-// hermes cursors are message row ids, namespaced away from zcode's mseq:pseq
+// hermes cursors are message row ids, prefixed away from zcode's mseq:pseq
 const CURSOR_PREFIX = "m";
 
+// returns the row id, or null for an unusable cursor (garbage degrades to a
+// fresh tail load rather than a silent full replay)
+function parseCursor(after) {
+  if (after == null) return null;
+  const n = Number(String(after).split(":")[1]);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 export function sessionMessages(id, after) {
-  const db = roDb();
+  const db = roDb(cfg.db);
   try {
     const sess = rows(db, `SELECT title, display_name, cwd FROM sessions WHERE id = ?`, [id])[0] ?? null;
-    const params = [id];
-    let where = "";
-    if (after) {
-      const n = Number(String(after).split(":")[1] ?? after);
-      if (Number.isFinite(n) && n >= 0) {
-        where = "AND id > ?";
-        params.push(n);
-      }
-    }
-    // The window (Tail N rows / id > cursor) selects raw message rows; the
-    // pairing step below may then emit more or fewer renderable items than
-    // rows. The result-status map is built from tool rows possibly outside
-    // the assistant rows' window — always scan a bounded recent slice.
-    const rowsOut = rows(
-      db,
-      `SELECT id, role, content, tool_name, tool_call_id, tool_calls, reasoning, reasoning_content, timestamp
-       FROM messages WHERE session_id = ? ${where}
-       ORDER BY id ASC LIMIT ${CONV_TAIL_ROWS}`,
-      params,
-    );
-    // tool_call_id -> { status } from result rows (role='tool'). Results can
-    // sit outside the polled window on resume; pull a recent slice instead
-    // of assuming they follow inside it.
-    const statusById = new Map();
-    for (const t of rows(db, `SELECT tool_call_id, content FROM messages
-                               WHERE session_id = ? AND role = 'tool'
-                               ORDER BY id DESC LIMIT ${CONV_TAIL_ROWS}`, [id])) {
-      if (t.tool_call_id && !statusById.has(t.tool_call_id)) {
-        statusById.set(t.tool_call_id, toolErrored(t.content) ? "error" : "completed");
-      }
-    }
-    const items = [];
-    // Assistant rows precede their result rows in id order, so every
-    // tool_call_id the window will claim is known up front — pre-scan to
-    // hide matched result rows; unclaimed ones (request outside the window)
-    // fall back to their own bare chip.
-    const seenCallIds = new Set();
-    for (const m of rowsOut) {
-      if (m.role === "assistant" && m.tool_calls) {
-        try {
-          for (const c of JSON.parse(m.tool_calls)) {
-            const callId = c?.id ?? c?.call_id;
-            if (callId) seenCallIds.add(callId);
-          }
-        } catch { /* malformed — the fallback chip path handles it */ }
-      }
-    }
-    let cursor = after ?? `${CURSOR_PREFIX}:0`;
-    for (const m of rowsOut) {
-      cursor = `${CURSOR_PREFIX}:${m.id}`;
-      for (const item of convItems(m, statusById, seenCallIds)) items.push(item);
-    }
-    return {
+    const base = {
       sessionId: id,
       title: sess?.title ?? (sess?.display_name ? String(sess.display_name) : null),
       directory: sess?.cwd ?? null,
-      cursor,
-      items,
     };
+    const resume = parseCursor(after);
+    if (after != null && resume == null) {
+      // garbage cursor: no replay (the client polls every 2s and would
+      // re-download the whole tail forever); echo its cursor back
+      return { ...base, cursor: after, items: [] };
+    }
+
+    // First load (no cursor): tail the last N rows, oldest first, per the
+    // contract. Resume: rows past the cursor in conversation order.
+    // Soft-archived rows (active = 0, written by rewind/undo and compaction)
+    // are taken back — never rendered.
+    const COLS = `id, role, content, tool_name, tool_call_id, tool_calls, reasoning, reasoning_content, timestamp`;
+    const rowsOut = resume == null
+      ? rows(db,
+          `SELECT ${COLS} FROM messages WHERE session_id = ? AND active = 1
+           ORDER BY id DESC LIMIT ${CONV_TAIL_ROWS}`, [id]).reverse()
+      : rows(db,
+          `SELECT ${COLS} FROM messages WHERE session_id = ? AND active = 1 AND id > ?
+           ORDER BY id ASC LIMIT ${CONV_TAIL_ROWS}`, [id, resume]);
+
+    // Tool-call chip ownership. A chip is emitted from the assistant request
+    // row (it carries the arguments); the paired result row supplies the
+    // status. Two dedupe hazards, both resolved by comparing request-row ids
+    // to the page floor:
+    //  - within this page: a result row whose request row is also in the
+    //    page would emit a second chip → suppress via the claimed-id set;
+    //  - across polls: on resume, a result row whose request row sits below
+    //    the cursor was already emitted by an earlier poll → suppress it too
+    //    (the id comparison is exact, no guessing). A result row whose
+    //    request row can't be found at all is a legacy/orphan — it still
+    //    gets a bare chip so the call isn't invisible.
+    const statusById = new Map();
+    for (const t of rows(db, `SELECT tool_call_id, content FROM messages
+                              WHERE session_id = ? AND role = 'tool' AND active = 1
+                              ORDER BY id DESC LIMIT ${CONV_TAIL_ROWS}`, [id])) {
+      if (t.tool_call_id && !statusById.has(t.tool_call_id)) {
+        statusById.set(t.tool_call_id, toolResult(t.content).status);
+      }
+    }
+
+    const items = [];
+    let cursor = after ?? `${CURSOR_PREFIX}:0`;
+    const claimedInPage = new Set();
+    for (const m of rowsOut) {
+      if (m.role !== "assistant" || !m.tool_calls) continue;
+      try {
+        for (const c of JSON.parse(m.tool_calls)) {
+          const cid = c?.id ?? c?.call_id;
+          if (cid) claimedInPage.add(cid);
+        }
+      } catch { /* malformed — the fallback chip path handles it */ }
+    }
+    // which of this page's result rows had their request row BELOW the page
+    // floor (emitted by an earlier poll)? one query over the page's call ids
+    const resultRows = rowsOut.filter((m) => m.role === "tool" && m.tool_call_id);
+    const claimedBelow = new Set();
+    if (resume != null && resultRows.length) {
+      const ids = resultRows.map((m) => m.tool_call_id);
+      const marks = ids.map(() => "?").join(",");
+      for (const r of rows(db, `SELECT DISTINCT j.value AS cid FROM messages a,
+                                json_each(a.tool_calls) j
+                                WHERE a.session_id = ? AND a.role = 'assistant'
+                                  AND a.id < ? AND j.value IN (${marks})`,
+        [id, resume, ...ids])) {
+        if (r.cid) claimedBelow.add(r.cid);
+      }
+    }
+
+    for (const m of rowsOut) {
+      cursor = `${CURSOR_PREFIX}:${m.id}`;
+      if (m.role === "tool" && m.tool_call_id) {
+        // already emitted from its request row: in this page (claimedInPage)
+        // or by an earlier poll (claimedBelow, possible only on resume)
+        if (claimedInPage.has(m.tool_call_id) || claimedBelow.has(m.tool_call_id)) continue;
+        // orphan result (request row missing or unparseable): bare chip
+      }
+      for (const item of convItems(m, statusById)) items.push(item);
+    }
+
+    return { ...base, cursor, items };
   } finally {
     db?.close();
   }
 }
 
-function convItems(m, statusById, seenCallIds) {
+function convItems(m, statusById) {
   const at = s2ms(m.timestamp) ?? Date.now();
   if (m.role === "tool") {
-    // A result whose call came from an assistant row outside the polled
-    // window (page-start slice, malformed request JSON) has no chip yet —
-    // render a bare one. The seen-set hides all matched results instead:
-    // each chip is emitted once, from the assistant request row.
-    if (m.tool_call_id && seenCallIds?.has(m.tool_call_id)) return [];
     return [{
       kind: "tool",
       role: "assistant",
       tool: m.tool_name ?? "?",
-      status: toolErrored(m.content) ? "error" : "completed",
+      status: toolResult(m.content).status,
       input: null,
       at,
     }];
   }
   if (m.role === "assistant" && m.tool_calls) {
-    // One row can request several parallel calls — one chip each. The chip
-    // status comes from the paired tool result row (the authoritative
-    // outcome); a call without a result row (in-flight / lost) shows as
-    // completed, and a result without a request falls back to its own chip.
+    // one row can request several parallel calls — one chip each; the
+    // status comes from the paired result row (authoritative outcome);
+    // a call without a result row (in-flight / lost) shows as completed
     try {
       const calls = JSON.parse(m.tool_calls);
       if (Array.isArray(calls) && calls.length) {

@@ -60,20 +60,27 @@ export default {
 }
 ```
 
-`generatedAt`, `totals`, `ticker`, and live-process counts are derived by the
-core, not the adapter — an adapter does not invent its own totals.
+`generatedAt`, `totals`, and live-process counts are derived by the core, not
+the adapter — an adapter does not invent its own totals. The `ticker` inside a
+snapshot is optional but legitimate: the core prefers a harness-provided
+ticker (its per-harness tool history is richer than anything the core could
+reconstruct from `lastTool`) and falls back to per-session `lastTool` entries.
+`tree edges` are the adapter's job to emit (`children` on the parent); the
+registry only namespaces them.
 
 ## Conventions the core enforces
 
 - **ID namespacing.** Session ids from every harness share one board, so the
   registry prefixes ids with the harness id: `zcode:sess_abc`,
   `hermes:run_42`. Inside an adapter you never see or produce the prefix —
-  you deal in raw ids, `harness/zcode/...` included. The registry maps edges
-  (`parentId`, tree lookup) for you.
+  you deal in raw ids, `harness/zcode/...` included. The registry maps edge
+  ids (`parentId`, `children`) across, but the parent→child edges themselves
+  must be built by the adapter.
 - **Status vocabulary.** Return one of the statuses above. `done`/`exited`
   mapping is yours to get right for your harness's vocabulary.
 - **Fail empty, never fail the poll.** A harness that isn't installed is not
-  an error.
+  an error. Missing/decorative tables degrade to empty; a genuinely broken
+  telemetry read throws so the registry surfaces it as a board warning.
 
 ## Adding a harness
 
