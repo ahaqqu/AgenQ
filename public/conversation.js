@@ -67,7 +67,12 @@ async function poll() {
     const d = await res.json();
     if (d.error) throw new Error(d.error);
     if (d.title) {
-      document.getElementById("title").textContent = d.title;
+      // prefix = owning harness (zcode:sess_x / hermes:7) — mark it so a
+      // conversation tab is identifiable independent of the board. The
+      // letter matches the board's harness marks (first letter, uppercased).
+      const h = id.includes(":") ? id.split(":")[0] : null;
+      document.getElementById("title").textContent =
+        (h ? `[${h.charAt(0).toUpperCase()}] ` : "") + d.title;
       document.title = d.title + " — AgenQ live";
     }
     if (d.items?.length) {

@@ -11,6 +11,17 @@ const ROLE_EMOJI = {
   "thermo-nuclear-code-quality-review-subagent": "🧹",
   "assistant-manager": "🔎",
 };
+// Harness origin marks: the letter is derived from the harness id
+// (zcode → Z, hermes → H), so any future adapter gets a mark with no map
+// and no client edit. One identical mark on every surface — no label
+// variant; the full harness name lives in the tooltip and the legend.
+// Accepts a session object (uses its `harness` field), a bare harness id
+// (ticker entries), or null.
+function harnessMark(s) {
+  const h = typeof s === "string" ? s : (s?.harness ?? "");
+  if (!h) return "";
+  return `<span class="hmark" title="harness: ${esc(h)}">${esc(h.charAt(0).toUpperCase())}</span>`;
+}
 const CTX_LIMIT = 200_000; // the cliff from the #94 analysis
 
 const $ = (id) => document.getElementById(id);

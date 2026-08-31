@@ -9,6 +9,7 @@ import { cfg } from "./config.mjs";
 export default {
   id: "zcode",
   label: "ZCode",
+  emoji: "🦓",
   hasStop: true,
   cfg,
 

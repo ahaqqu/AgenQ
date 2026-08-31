@@ -72,7 +72,6 @@ function labelHtml(s) {
 const prettyTool = (t) => String(t ?? "").replace(/^mcp__/, "mcp:").replace(/__/g, ":");
 
 const roleIcon = (s) => (s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️");
-
 // threshold colors shared by the chip right side and the card headers:
 // green = comfortable, amber = getting close, red = critical
 const chCls = (ch) => ch >= 0.9 ? "st-good" : ch >= 0.7 ? "st-warn" : "st-hot";
@@ -99,20 +98,22 @@ function currentActivity(s) {
 }
 
 let prev = null;
-// harness origin badges — hidden while only one harness is mounted so the
-// single-harness board looks exactly as before
-let multiHarness = false;
 let filterProject = "all";
+let activityFilter = "all"; // recent-activity feed: all | tool | error | session
+let harnessById = new Map(); // harness id -> { id, label, emoji, hasStop }
 let flashId = null; // banner click → highlight this card until flashUntil
 let flashUntil = 0;
 const stoppedDirs = new Set(); // projects the user stopped this page-load
 
-function agentCard(s) {
-  const emoji = ROLE_EMOJI[s.role] ?? "🤖";
+// showHarness: only for cards outside a marked section (the "other
+// sessions" bucket) — cards under a root inherit the root head's mark,
+// so repeating the letter on every subagent card is noise
+function agentCard(s, showHarness = true) {
   const name = s.role ?? (s.title ? "main" : "session");
   const sparkId = "spark-" + s.id;
   const modelHtml = [s.model, s.thinking && `[${s.thinking}]`].filter(Boolean).join(" ");
-  const harnessBadge = multiHarness ? `<span class="harness" title="harness: ${esc(s.harness ?? "")}">${esc(s.harness ?? "")}</span>` : "";
+  // icon grammar everywhere: status dot → harness mark → role icon → name
+  const harnessBadge = showHarness ? harnessMark(s) : "";
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
   const todoHtml = (s.todos ?? []).slice(0, 8).map((t) =>
@@ -122,10 +123,10 @@ function agentCard(s) {
   <div class="kid" id="kid-${s.id}">
     <div class="row">
       <span class="status ${esc(dot)}" title="${esc(s.status)}${s.live === false ? " · process exited" : ""}"></span>
-      <span>${emoji}</span>
+      ${harnessBadge}
+      <span>${roleIcon(s)}</span>
       <span class="name">${esc(name)}</span>
       <span class="model">${esc(modelHtml)}</span>
-      ${harnessBadge}
     </div>
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
     <div class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</div>
@@ -137,11 +138,13 @@ function agentCard(s) {
   </div>`;
 }
 
-// stop is a project action: every zcode-cli process in that directory is
-// the same run, and all of them die together
-async function stopProject(directory, project, procCount) {
+// stop is a project action: every harness process in that directory is
+// the same run, and all of them die together. The sessionId is sent so the
+// server resolves the stop target through the exact session this dialog
+// was built from (matches its own snapshot-order resolution).
+async function stopProject(directory, project, procCount, harness, sessionId) {
   const ok = confirm(
-    `Kill ${procCount} live zcode-cli process${procCount === 1 ? "" : "es"} in "${project}"?\n\n` +
+    `Kill ${procCount} live ${harness ?? "harness"} process${procCount === 1 ? "" : "es"} in "${project}"?\n\n` +
     `This stops the whole project run — every session in\n${directory}\n` +
     `dies with it, not just the failed one.`,
   );
@@ -150,7 +153,7 @@ async function stopProject(directory, project, procCount) {
     const res = await fetch("/api/stop", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ directory }),
+      body: JSON.stringify({ directory, sessionId }),
     });
     const out = await res.json();
     if (out.killed?.length) {
@@ -178,7 +181,8 @@ function toast(msg, isErr = false) {
 function onStopClick(e) {
   const btn = e.target.closest(".stopbtn");
   if (!btn) return false;
-  stopProject(btn.dataset.dir, btn.dataset.name, Number(btn.dataset.procs));
+  const harness = harnessById.get(btn.dataset.harness ?? "")?.label;
+  stopProject(btn.dataset.dir, btn.dataset.name, Number(btn.dataset.procs), harness, btn.dataset.session ?? null);
   return true;
 }
 
@@ -210,6 +214,12 @@ $("ticker").addEventListener("click", (e) => {
 
 $("filter").addEventListener("change", () => {
   filterProject = $("filter").value;
+  poll();
+});
+
+// recent-activity category filter
+$("tickerfilter").addEventListener("change", () => {
+  activityFilter = $("tickerfilter").value;
   poll();
 });
 
@@ -253,8 +263,19 @@ $("legend").innerHTML = `
     <div class="lrow"><span class="ic">🤖</span> other subagent role</div>
     <div class="lrow"><span class="ic">💤</span> idle 5m+ but process still alive</div>
     <div class="lrow"><span class="ic">⚠</span> last error of that agent</div>
-    <div class="lrow"><span class="ic">⏹</span> kill process — SIGTERMs every CLI process of that project (the whole project run stops)</div>
+    <div class="lrow"><span class="ic hmark">Z</span> harness mark — every row shows which harness runs the agent (<span id="legend-harnesses"></span>)</div>
+    <div class="lrow"><span class="ic">⏹</span> kill process — stops every live process of that project run (the whole run stops)</div>
   </div>`;
+
+// the legend's harness list comes from the mounted adapters, not from a
+// hardcoded string — it can't drift when a harness is added or renamed
+function renderLegendHarnesses(harnesses) {
+  const row = $("legend-harnesses");
+  if (!row) return;
+  row.innerHTML = (harnesses ?? []).map((h) =>
+    `<span title="harness: ${esc(h.id)}"><span class="hmark">${esc(h.id.charAt(0).toUpperCase())}</span> ${esc(h.label)}</span>`
+  ).join(" · ") || "none mounted";
+}
 
 function render(state) {
   // copying something? defer the re-render until the selection is gone —
@@ -263,7 +284,8 @@ function render(state) {
   if (selection && !selection.isCollapsed) return;
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
   computeInstances(state.sessions);
-  multiHarness = (state.harnesses?.length ?? 0) > 1;
+  harnessById = new Map((state.harnesses ?? []).map((h) => [h.id, h]));
+  renderLegendHarnesses(state.harnesses);
 
   // project filter dropdown
   const projects = [...new Set(state.sessions.map((s) => s.project).filter(Boolean))].sort();
@@ -302,18 +324,22 @@ function render(state) {
       const procs = state.liveProcs?.[dir] ?? 0;
       const proj = list[0].project ?? "unknown project";
       const stoppable = dir !== "?" && procs > 0 && !stoppedDirs.has(dir);
+      // The dialog names the run via the stop target's owning harness;
+      // routing itself is the server's job — it resolves the same session
+      // (list[0], snapshot order) through the sessionId we send below.
+      const owner = list.find((s) => s.harness)?.harness;
       return `
       <div class="agroup">
         <div class="agroup-head">
           <span title="${esc(dir)}">${esc(shortProject(proj))}</span>
-          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" title="SIGTERM all ${procs} zcode-cli process(es) in ${esc(dir)}">⏹ kill ${procs} process${procs === 1 ? "" : "es"}</button>`
+          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" data-session="${esc(list[0].id)}" data-harness="${esc(owner ?? "")}" title="SIGTERM all ${procs} live process(es) of this ${esc(harnessById.get(owner ?? "")?.label ?? "harness")} run in ${esc(dir)}">⏹ kill ${procs} process${procs === 1 ? "" : "es"}</button>`
             : stoppedDirs.has(dir) ? `<span class="stoppedmark">⏹ stopped by you</span>` : ""}
         </div>
         ${list.map((s) => {
           const state = stoppedDirs.has(dir) ? "stopped by you" : s.live ? "" : "run exited";
           return `
           <div class="aentry ${s.live ? "" : "exited"}">
-            <span class="entry" data-target="${esc(s.id)}" title="${esc(fullLabel(s))}"><span class="ic">${roleIcon(s)}</span>${labelHtml(s)}</span>
+            <span class="entry" data-target="${esc(s.id)}" title="${esc(fullLabel(s))}">${harnessMark(s)}<span class="ic">${roleIcon(s)}</span>${labelHtml(s)}</span>
             <span class="act">· ${esc(humanType(s.lastError?.type ?? "failed"))}</span>
             <span class="r">- ${esc(tagged([agoLong(s.lastAt), state].filter(Boolean).join(" · "), s))}</span>
           </div>`;
@@ -326,20 +352,21 @@ function render(state) {
   const actives = state.sessions.filter((s) => s.status === "running" && matches(s) && !stoppedDirs.has(s.directory)).sort(byLast);
   $("activewrap").style.display = actives.length ? "block" : "none";
   $("activebar").innerHTML = actives.map((s) => {
-    const emoji = s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️";
     const doing = currentActivity(s);
     const st = s.lastTool?.status && doing === s.lastTool.name ? ` ${s.lastTool.status}` : "";
     const open = expandedId === s.id;
     return `<div class="chip ${open ? "open" : ""}" data-session="${esc(s.id)}">` +
       `<button class="convbtn" data-conv="${esc(s.id)}" title="open the live conversation in a new tab">💬 live</button>` +
-      `<span class="status running"></span><span>${emoji}</span>` +
+      `<span class="status running"></span>${harnessMark(s)}<span>${roleIcon(s)}</span>` +
       `<span class="l" title="${esc(fullLabel(s))}">${labelHtml(s)} <span class="act" title="${esc(doing)}">${esc(doing + st)}</span></span>` +
       `<span class="dash">-</span>` +
       `<span class="r">${instTag(s) ? esc(instTag(s)) + " · " : ""}${statsHtml(s)} · ${ago(s.lastAt)}</span></div>` +
       (open ? `<div class="chipdetail" id="detail-${esc(s.id)}">${detailHtml(detailCache.get(s.id))}</div>` : "");
   }).join("");
 
-  // tree — newest roots first, children newest first
+  // tree — ordered by time only (newest roots first, newest children
+  // first): recency is the primary key; same-project sections end up
+  // adjacent on their own because they share activity windows
   const seen = new Set();
   const sections = [];
   const rootNodes = state.roots.map((rid) => byId.get(rid)).filter(Boolean).sort(byLast);
@@ -353,19 +380,20 @@ function render(state) {
       <div class="root" id="root-${esc(root.id)}">
         <div class="head">
           <span class="status ${esc(root.status === "failed" && root.live === false ? "exited" : root.status)}" title="${esc(root.status)}${root.live === false ? " · process exited" : ""}"></span>
+          ${harnessMark(root)}
           <span>🧑‍✈️</span>
           ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
           <span class="model">${esc([root.model, root.thinking && `[${root.thinking}]`].filter(Boolean).join(" "))}</span>
-          ${multiHarness ? `<span class="harness" title="harness: ${esc(root.harness ?? "")}">${esc(root.harness ?? "")}</span>` : ""}
+          ${harnessMark(root)}
           <span class="meta">${statsHtml(root)} · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
-        <div class="kids">${kids.map(agentCard).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
+        <div class="kids">${kids.map((s) => agentCard(s, false)).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
       </div>`);
   }
   const orphans = state.sessions.filter((s) => !seen.has(s.id) && matches(s)).sort(byLast);
   if (orphans.length)
-    sections.push(`<div class="root"><div class="head"><span class="title">other sessions</span></div><div class="kids">${orphans.map(agentCard).join("")}</div></div>`);
+    sections.push(`<div class="root"><div class="head"><span class="title">other sessions</span></div><div class="kids">${orphans.map((s) => agentCard(s, true)).join("")}</div></div>`);
   $("tree").innerHTML = sections.join("");
 
   // re-apply the banner-jump highlight; re-renders would otherwise wipe it
@@ -381,23 +409,59 @@ function render(state) {
     if (c) drawSpark(c, s.sparkline);
   }
 
-  // ticker with flash-on-new
-  const prevTicker = prev?.ticker ?? [];
-  const known = new Set(prevTicker.map((t) => t.at + t.tool));
-  $("ticker").innerHTML = state.ticker.map((t) => {
-    const isNew = !known.has(t.at + t.tool) && prevTicker.length > 0;
-    const agent = byId.get(t.sessionId);
-    // same tooltip vocabulary as the chips and FAILED rows: full project,
-    // role, instance and brief — plus what the tool call actually was
-    const tip = (agent ? fullLabel(agent) : t.sessionId) +
-      ` — ${prettyTool(t.tool)}` +
-      (t.status ? ` · ${t.status}` : "") +
-      (t.outputBytes != null ? ` · ${fmt(t.outputBytes)}B` : "");
-    const right = [t.outputBytes != null ? `${fmt(t.outputBytes)}B` : "", ago(t.at)].filter(Boolean).join(" · ");
-    return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="${esc(tip)}"><span class="l">${agent ? roleIcon(agent) + " " + labelHtml(agent) : "session"} <span class="act">${esc(prettyTool(t.tool))} ${t.status ?? ""}</span></span><span class="dash">-</span><span class="r">${esc(tagged(right, agent))}</span></li>`;
+  // recent-activity feed: tool calls + session errors + session starts,
+  // merged into one time-ordered stream. `activityFilter` narrows it to a
+  // category; flash-on-new keys on kind+at+text so only genuinely new rows
+  // animate, and rows jump to their card on click as before.
+  const feed = [];
+  for (const t of state.ticker) {
+    feed.push({ kind: "tool", at: t.at, t, agent: byId.get(t.sessionId) });
+  }
+  for (const s of state.sessions) {
+    if (s.status === "failed" && s.lastError) {
+      feed.push({ kind: "error", at: s.lastError.at ?? s.lastAt ?? 0, s });
+    }
+    feed.push({ kind: "session", at: s.firstAt ?? s.lastAt ?? 0, s });
+  }
+  feed.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  const shown = activityFilter === "all" ? feed : feed.filter((f) => f.kind === activityFilter);
+  const prevFeed = prev?.__feed ?? [];
+  const knownFeed = new Set(prevFeed.map((f) => f.kind + ":" + f.at + ":" + (f.t?.tool ?? f.s?.id)));
+  const ACTIVITY_MAX = 20; // cap applies after filtering — 20 per category, never longer
+  $("ticker").innerHTML = shown.slice(0, ACTIVITY_MAX).map((f) => {
+    const isNew = !knownFeed.has(f.kind + ":" + f.at + ":" + (f.t?.tool ?? f.s?.id)) && prevFeed.length > 0;
+    let l, r, tip;
+    if (f.kind === "tool") {
+      const t = f.t, agent = f.agent;
+      // same tooltip vocabulary as the chips and FAILED rows: full project,
+      // role, instance and brief — plus what the tool call actually was
+      tip = (agent ? fullLabel(agent) : t.sessionId) +
+        ` — ${prettyTool(t.tool)}` +
+        (t.status ? ` · ${t.status}` : "") +
+        (t.outputBytes != null ? ` · ${fmt(t.outputBytes)}B` : "");
+      const err = t.status && t.status !== "completed" && t.status !== "running" && t.status !== "pending";
+      l = (agent ? harnessMark(agent) + " " + roleIcon(agent) + " " + labelHtml(agent) : harnessMark(t.harness ?? t.sessionId) + " session") +
+        ` <span class="act ${err ? "errmark" : "okmark"}">⚡ ${esc(prettyTool(t.tool))} ${t.status ?? ""}</span>`;
+      r = [t.outputBytes != null ? `${fmt(t.outputBytes)}B` : "", ago(t.at)].filter(Boolean).join(" · ");
+      return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="${esc(tip)}"><span class="l">${l}</span><span class="dash">-</span><span class="r">${esc(tagged(r, f.agent))}</span></li>`;
+    }
+    if (f.kind === "error") {
+      const s = f.s;
+      tip = fullLabel(s) + ` — ${humanType(s.lastError.type)}: ${s.lastError.message ?? ""}`;
+      l = harnessMark(s) + " " + roleIcon(s) + " " + labelHtml(s) +
+        ` <span class="act errmark">⚠ ${esc(humanType(s.lastError.type))}</span>`;
+      r = ago(f.at);
+      return `<li class="${isNew ? "new" : ""}" data-target="${esc(s.id)}" title="${esc(tip)}"><span class="l">${l}</span><span class="dash">-</span><span class="r">${esc(tagged(r, s))}</span></li>`;
+    }
+    const s = f.s;
+    tip = fullLabel(s) + ` — session started ${new Date(f.at).toLocaleString()}, now ${s.status}`;
+    l = harnessMark(s) + " " + roleIcon(s) + " " + labelHtml(s) +
+      ` <span class="act okmark">▶ started · ${esc(s.status)}</span>`;
+    r = ago(f.at);
+    return `<li class="${isNew ? "new" : ""}" data-target="${esc(s.id)}" title="${esc(tip)}"><span class="l">${l}</span><span class="dash">-</span><span class="r">${esc(tagged(r, s))}</span></li>`;
   }).join("");
-
   prev = state;
+  prev.__feed = feed;
 }
 
 async function poll() {
