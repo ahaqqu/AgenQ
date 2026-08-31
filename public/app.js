@@ -357,21 +357,12 @@ function render(state) {
       (open ? `<div class="chipdetail" id="detail-${esc(s.id)}">${detailHtml(detailCache.get(s.id))}</div>` : "");
   }).join("");
 
-  // tree — sections grouped by project; the group order follows each
-  // project's most recent activity (fresh projects float to the top), and
-  // roots within a group are newest first. Children newest first too.
-  const projLast = new Map(); // project -> newest lastAt among its roots
-  for (const rid of state.roots) {
-    const r = byId.get(rid);
-    if (!r?.project) continue;
-    projLast.set(r.project, Math.max(projLast.get(r.project) ?? 0, r.lastAt ?? 0));
-  }
-  const byProject = (a, b) =>
-    (projLast.get(b.project ?? "~none") ?? 0) - (projLast.get(a.project ?? "~none") ?? 0) ||
-    byLast(a, b);
+  // tree — ordered by time only (newest roots first, newest children
+  // first): recency is the primary key; same-project sections end up
+  // adjacent on their own because they share activity windows
   const seen = new Set();
   const sections = [];
-  const rootNodes = state.roots.map((rid) => byId.get(rid)).filter(Boolean).sort(byProject);
+  const rootNodes = state.roots.map((rid) => byId.get(rid)).filter(Boolean).sort(byLast);
   for (const root of rootNodes) {
     if (!root) continue;
     if (!matches(root)) continue;
