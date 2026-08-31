@@ -176,6 +176,14 @@ function gatherDb() {
       SELECT session_id, input_tokens, started_at
       FROM model_usage ORDER BY started_at`);
 
+    // model + thinking level of each session's most recent request (ties →
+    // both rows, map insertion order makes the later one win, which is harmless)
+    const models = run("models", `
+      SELECT session_id, model_id, variant AS thinking
+      FROM model_usage mu
+      WHERE completed_at = (SELECT MAX(completed_at) FROM model_usage x
+                            WHERE x.session_id = mu.session_id)`);
+
     const errors = run("errors", `
       SELECT session_id, error_type, error_message, completed_at
       FROM model_usage
@@ -207,7 +215,7 @@ function gatherDb() {
     } catch {
       // older CLI builds may lack columns; titles are decorative
     }
-    return { usage, spark, errors, lastok, todos, tools, titles };
+    return { usage, spark, models, errors, lastok, todos, tools, titles };
   } finally {
     db?.close();
   }
@@ -262,7 +270,7 @@ async function gatherAgentLinks() {
 const SPARK_TAIL = 120; // sparkline points per agent
 const ACTIVE_MS = 5 * 60_000; // heartbeat within this = active; idle past it = sleep
 
-async function assemble({ usage, spark, errors, lastok, todos, tools, titles, links, liveProcs, now }) {
+async function assemble({ usage, spark, models, errors, lastok, todos, tools, titles, links, liveProcs, now }) {
   const cutoff = now - WINDOW_MS;
 
   const sessions = new Map();
@@ -292,6 +300,7 @@ async function assemble({ usage, spark, errors, lastok, todos, tools, titles, li
         directory: t?.directory ?? null,
         role: null,
         model: null,
+        thinking: null,
         status: "idle",
         requests: 0,
         inputTokens: 0,
@@ -309,6 +318,15 @@ async function assemble({ usage, spark, errors, lastok, todos, tools, titles, li
     }
     return sessions.get(id);
   };
+
+  // model per session from its latest request, before the links loop so
+  // profile-pinned metadata (when present) still wins
+  const modelBySession = new Map(models.map((r) => [r.session_id, r]));
+  for (const [id, r] of modelBySession) {
+    const s = ensure(id);
+    s.model ??= r.model_id;
+    s.thinking ??= r.thinking || null;
+  }
 
   // usage heartbeats
   const sparkBySession = new Map();
@@ -361,7 +379,7 @@ async function assemble({ usage, spark, errors, lastok, todos, tools, titles, li
     const parent = ensure(l.parentSessionId);
     child.parentSessionId = l.parentSessionId;
     child.role = l.role;
-    child.model = l.model;
+    child.model = l.model ?? child.model;
     child.project = child.project ?? titleById.get(l.parentSessionId)?.project ?? null;
     child.directory = child.directory ?? titleById.get(l.parentSessionId)?.directory ?? null;
     child.linkStatus = l.status;
@@ -453,10 +471,10 @@ async function assemble({ usage, spark, errors, lastok, todos, tools, titles, li
 }
 
 async function snapshot() {
-  const { usage, spark, errors, lastok, todos, tools, titles } = gatherDb();
+  const { usage, spark, models, errors, lastok, todos, tools, titles } = gatherDb();
   const links = await gatherAgentLinks();
   const liveProcs = gatherLiveProcs();
-  return assemble({ usage, spark, errors, lastok, todos, tools, titles, links, liveProcs, now: Date.now() });
+  return assemble({ usage, spark, models, errors, lastok, todos, tools, titles, links, liveProcs, now: Date.now() });
 }
 
 // ---------- per-session detail (lazy — only read when the UI expands a row) ----------
