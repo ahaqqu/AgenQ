@@ -8,6 +8,7 @@ import { cfg } from "./config.mjs";
 export default {
   id: "hermes",
   label: "Hermes",
+  emoji: "👟",
   // Hermes runs sessions inside long-lived backend processes (gateway /
   // tui-gateway) that AgenQ has no safe, harness-native way to terminate —
   // no stopRun, so the board never offers one for hermes runs.

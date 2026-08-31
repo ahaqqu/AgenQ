@@ -19,6 +19,7 @@ An adapter is one directory exporting a single default object from
 export default {
   id: "zcode",                    // unique, stable; becomes the session-id prefix
   label: "ZCode",                 // shown in the UI origin badge
+  emoji: "🦓",                    // compact origin mark on every board item
   hasStop: true,                  // does stopRun() exist for this harness?
 
   // One poll's full board data for this harness. Must return the shape in
@@ -88,12 +89,18 @@ registry only namespaces them.
    against that harness's telemetry (SQLite, JSONL, whatever it leaves on
    disk). Give it its own `config.mjs` for flags and defaults, mirroring
    `harness/zcode/config.mjs` — `windowHours` and any `--<harness>-…` paths.
+   Pick an `emoji` for the origin marks (add it to `HARNESS_EMOJI` in
+   `public/visuals.js` so it renders before the first snapshot too).
 2. Register it in `harness/index.mjs`.
 3. If it has a stop action, implement `stopRun` and set `hasStop: true`.
 
-The frontend needs no changes: origin badges render automatically once two
-harnesses are mounted. `harness/hermes/` is a working second reference — a
-single-session SQLite (`~/.hermes/state.db`), no stop action.
+The frontend needs no other changes: sessions from all harnesses merge into
+one time-ordered tree, ticker, Active Now strip and failures panel, and every
+row carries the harness origin mark. `harness/hermes/` is a working second
+reference — a single-session SQLite (`~/.hermes/state.db`), no stop action.
+
+How much board data each harness can supply — and what is inherently vs only
+currently missing — is tracked in [docs/harness-data-parity.md](../docs/harness-data-parity.md).
 
 The AGENTS.md review workflow gates every PR on a browser smoke test of the
 running board (see the repo root AGENTS.md).

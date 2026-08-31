@@ -65,15 +65,16 @@ export async function snapshot(now = Date.now()) {
         harnesses.push({
           id: adapter.id,
           label: adapter.label,
+          emoji: adapter.emoji ?? null,
           hasStop: adapter.hasStop === true,
           liveProcs: snap.liveProcs,
         });
       } else {
-        harnesses.push({ id: adapter.id, label: adapter.label, hasStop: adapter.hasStop === true, liveProcs: {} });
+        harnesses.push({ id: adapter.id, label: adapter.label, emoji: adapter.emoji ?? null, hasStop: adapter.hasStop === true, liveProcs: {} });
       }
     } catch (e) {
       warnings.push(`${adapter.id}: ${e?.message ?? String(e)}`);
-      harnesses.push({ id: adapter.id, label: adapter.label, hasStop: adapter.hasStop === true, liveProcs: {} });
+      harnesses.push({ id: adapter.id, label: adapter.label, emoji: adapter.emoji ?? null, hasStop: adapter.hasStop === true, liveProcs: {} });
     }
   }
 

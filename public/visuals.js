@@ -11,6 +11,23 @@ const ROLE_EMOJI = {
   "thermo-nuclear-code-quality-review-subagent": "🧹",
   "assistant-manager": "🔎",
 };
+// harness origin marks — fallbacks so a newly mounted harness gets a working
+// badge before anyone updates this map; unknown ids degrade to a link mark,
+// never to "no badge"
+const HARNESS_EMOJI = {
+  "zcode": "🦓",
+  "hermes": "👟",
+};
+// Inline origin mark for every row/item that shows an agent: emoji always,
+// plus the text label on wide rows (withLabel). Tight rows (chips, ticker,
+// failed alerts) get emoji only; the full harness name is always in the
+// tooltip.
+function harnessMark(s, withLabel = false) {
+  const h = s.harness ?? "";
+  if (!h) return "";
+  const e = HARNESS_EMOJI[h] ?? "🔗";
+  return `<span class="hmark ${withLabel ? "wide" : ""}" title="harness: ${esc(h)}">${e}${withLabel ? " " + esc(h) : ""}</span>`;
+}
 const CTX_LIMIT = 200_000; // the cliff from the #94 analysis
 
 const $ = (id) => document.getElementById(id);
