@@ -427,7 +427,8 @@ function render(state) {
   const shown = activityFilter === "all" ? feed : feed.filter((f) => f.kind === activityFilter);
   const prevFeed = prev?.__feed ?? [];
   const knownFeed = new Set(prevFeed.map((f) => f.kind + ":" + f.at + ":" + (f.t?.tool ?? f.s?.id)));
-  $("ticker").innerHTML = shown.slice(0, 40).map((f) => {
+  const ACTIVITY_MAX = 20; // cap applies after filtering — 20 per category, never longer
+  $("ticker").innerHTML = shown.slice(0, ACTIVITY_MAX).map((f) => {
     const isNew = !knownFeed.has(f.kind + ":" + f.at + ":" + (f.t?.tool ?? f.s?.id)) && prevFeed.length > 0;
     let l, r, tip;
     if (f.kind === "tool") {
