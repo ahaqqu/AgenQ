@@ -46,6 +46,20 @@ is not a template fork and ships no gate, so the pin is a plain
 per-project choice. Re-pin via these files or keep a user-scope override
 in `~/.zcode/agents/<role>.md`.
 
+**Portability caveat:** the committed `custom:` pin embeds a
+**machine-specific provider id**. On a fresh clone the provider id will
+differ, and every pinned role fails at spawn with
+`Model provider is not configured: <id>` until re-pinned. Because user
+scope overrides workspace scope, the zero-edit migration path is to keep
+the committed files as-is and put a one-line override per role in
+`~/.zcode/agents/<role>.md` with the local provider's `custom:` ref —
+or remove the `model:` line entirely to inherit the session default.
+Frontmatter edits only reach spawns after a client restart (caveat
+below). Also note `assistant-manager.md`'s frontmatter is
+**UI-canonical** (quoted scalars, `color:`, `injectAgentsMd:` — written
+by Settings → Subagents on save); the other six role files are
+hand-kept and intentionally simpler.
+
 Resolution order (used by ZCode):
 
 1. **User override:** `~/.zcode/agents/<role>.md` (wins — the sanctioned

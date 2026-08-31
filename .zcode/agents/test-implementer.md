@@ -1,6 +1,6 @@
 ---
 name: test-implementer
-description: Test implementer for the manager-orchestrated workflow. Used on model:high tickets after the senior-implementer finishes core code: writes the test suite from the senior's test brief, iterates it to CI green, and hands the evidence back. Never modifies production source and never opens a pull request.
+description: "Test implementer for the manager-orchestrated workflow. Used on model:high tickets after the senior-implementer finishes core code: writes the test suite from the senior's test brief, iterates it to CI green, and hands the evidence back. Never modifies production source and never opens a pull request."
 background: true
 tools: ['*']
 skills: [writing-tests]
