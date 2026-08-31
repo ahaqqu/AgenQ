@@ -1,0 +1,22 @@
+{
+  "_meta": "Runtime-derived fixture (review A5): PostToolUse on Bash whose tool_response mirrors the runtime's BashOutputSchema (status/exitCode/stdout/stderr plus envelope fields the guardrail ignores). CI parses this to catch contract and outcome-classification drift.",
+  "agent_type": "implementer",
+  "cwd": "/home/user/project",
+  "hook_event_name": "PostToolUse",
+  "permission_mode": "default",
+  "session_id": "sess_fixture_posttooluse",
+  "tool_input": {
+    "command": "bun run test"
+  },
+  "tool_name": "Bash",
+  "tool_response": {
+    "exitCode": 1,
+    "interrupted": false,
+    "stderr": "FAIL tests/auth.test.ts > auth > rejects an expired token\n expected 401 to be 200",
+    "status": "completed",
+    "stdout": ""
+  },
+  "tool_use_id": "toolu_01FixturePostToolUse",
+  "traceId": "tr_fixture_0002",
+  "turnId": "urn_fixture_0002"
+}

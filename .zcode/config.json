@@ -1,0 +1,103 @@
+{
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "PreToolUse": [
+        {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "bun",
+              "args": [
+                "${ZCODE_PROJECT_DIR}/scripts/iteration-guardrail/hook.mjs"
+              ],
+              "enabled": true,
+              "timeoutMs": 10000,
+              "statusMessage": "Iteration guardrail: checking verification-loop caps"
+            }
+          ]
+        }
+      ],
+      "PostToolUse": [
+        {
+          "matcher": "Agent",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "bun",
+              "args": [
+                "${ZCODE_PROJECT_DIR}/scripts/agent-usage-metadata/hook.mjs"
+              ],
+              "enabled": true,
+              "timeoutMs": 30000,
+              "statusMessage": "Recording subagent token usage (dispatch completed)"
+            }
+          ]
+        },
+        {
+          "matcher": "TaskOutput",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "bun",
+              "args": [
+                "${ZCODE_PROJECT_DIR}/scripts/agent-usage-metadata/hook.mjs"
+              ],
+              "enabled": true,
+              "timeoutMs": 30000,
+              "statusMessage": "Recording subagent token usage (result collected)"
+            }
+          ]
+        },
+        {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "bun",
+              "args": [
+                "${ZCODE_PROJECT_DIR}/scripts/iteration-guardrail/hook.mjs"
+              ],
+              "enabled": true,
+              "timeoutMs": 10000,
+              "statusMessage": "Iteration guardrail: recording verification outcome"
+            }
+          ]
+        },
+        {
+          "matcher": "Edit|Write",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "bun",
+              "args": [
+                "${ZCODE_PROJECT_DIR}/scripts/iteration-guardrail/hook.mjs"
+              ],
+              "enabled": true,
+              "timeoutMs": 10000,
+              "statusMessage": "Iteration guardrail: recording fix attempt"
+            }
+          ]
+        }
+      ],
+      "PostToolUseFailure": [
+        {
+          "matcher": "Bash",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "bun",
+              "args": [
+                "${ZCODE_PROJECT_DIR}/scripts/iteration-guardrail/hook.mjs"
+              ],
+              "enabled": true,
+              "timeoutMs": 10000,
+              "statusMessage": "Iteration guardrail: recording failed verification"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

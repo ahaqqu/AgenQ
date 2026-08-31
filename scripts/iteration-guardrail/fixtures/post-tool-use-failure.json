@@ -1,0 +1,21 @@
+{
+  "_meta": "Runtime-derived fixture (review A5): PostToolUseFailure on Bash as delivered by the runtime's failure-hook runner (error message + type, is_interrupt false for a genuine failure). CI parses this to catch contract drift.",
+  "agent_type": "implementer",
+  "cwd": "/home/user/project",
+  "error": {
+    "message": "Hook process failed to spawn: bun: command not found",
+    "type": "Error"
+  },
+  "hook_event_name": "PostToolUseFailure",
+  "isInterrupt": false,
+  "is_interrupt": false,
+  "permission_mode": "default",
+  "session_id": "sess_fixture_failure",
+  "tool_input": {
+    "command": "bun run test"
+  },
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_01FixtureFailure",
+  "traceId": "tr_fixture_0004",
+  "turnId": "urn_fixture_0004"
+}
