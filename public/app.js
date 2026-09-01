@@ -17,6 +17,10 @@ const shortProject = (p) => {
 // same-role siblings under one parent get instance numbers (1/3, 2/3 …) in
 // dispatch order — recomputed from each snapshot so it can't go stale
 let instOf = new Map(); // session id -> { i, n }
+
+// the board's status vocabulary for wide ticker rows (conversation.js keeps
+// its own copy for the live tab)
+const ST_CLASS = { running: "running", completed: "completed", done: "completed", pending: "pending", error: "error", failed: "error", cancelled: "error" };
 function computeInstances(sessions) {
   instOf = new Map();
   const groups = new Map(); // parent|role -> sessions[]
@@ -127,6 +131,7 @@ function agentCard(s, showHarness = true) {
       <span>${roleIcon(s)}</span>
       <span class="name">${esc(name)}</span>
       <span class="model">${esc(modelHtml)}</span>
+      <button class="convbtn" data-conv="${esc(s.id)}" title="open the live conversation in a new tab">💬</button>
     </div>
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
     <div class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</div>
@@ -247,6 +252,13 @@ $("activebar").addEventListener("click", (e) => {
   if (expandedId) fetchDetail(expandedId, true);
   poll();
 });
+// 💬 buttons live on Active Now chips, root heads and agent cards — one
+// delegated listener opens the live conversation tab for any of them
+document.body.addEventListener("click", (e) => {
+  const conv = e.target.closest(".convbtn");
+  if (conv) window.open("/conversation.html#" + encodeURIComponent(conv.dataset.conv), "_blank");
+});
+
 $("legend").innerHTML = `
   <div class="lgroup">
     <div class="lhead">STATUS DOTS</div>
@@ -318,6 +330,9 @@ function render(state) {
   );
   $("alert").classList.toggle("show", failed.length > 0);
   $("alert").classList.toggle("livefail", failed.some((s) => s.live));
+  // wide mode: with no failure panel beside it, the feed takes the full
+  // row — room for the columns the narrow grid squeezes out
+  document.body.classList.toggle("feedwide", failed.length === 0);
   const alertHtml =
     `<div class="ah">FAILED</div>` +
     ordered.map(([dir, list]) => {
@@ -385,7 +400,7 @@ function render(state) {
           ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
           <span class="title">${esc(root.title ?? "main session")}</span>
           <span class="model">${esc([root.model, root.thinking && `[${root.thinking}]`].filter(Boolean).join(" "))}</span>
-          ${harnessMark(root)}
+          <button class="convbtn" data-conv="${esc(root.id)}" title="open the live conversation in a new tab">💬</button>
           <span class="meta">${statsHtml(root)} · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
         </div>
         <div class="kids">${kids.map((s) => agentCard(s, false)).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
@@ -428,6 +443,23 @@ function render(state) {
   const prevFeed = prev?.__feed ?? [];
   const knownFeed = new Set(prevFeed.map((f) => f.kind + ":" + f.at + ":" + (f.t?.tool ?? f.s?.id)));
   const ACTIVITY_MAX = 20; // cap applies after filtering — 20 per category, never longer
+  // wide mode trades the tight dash-grammar for explicit columns: project,
+  // full harness label, exact error text, full timestamp — information the
+  // half-width layout clips to tooltips
+  const wide = document.body.classList.contains("feedwide");
+  const wideWho = (f) => {
+    const s = f.s ?? f.agent;
+    const proj = s?.project ? `<span class="proj" title="${esc(s.project)}">${esc(shortProject(s.project))}</span> · ` : "";
+    return proj + (s ? esc(s.role ?? s.title ?? s.id.slice(0, 12)) : esc(f.t?.sessionId ?? ""));
+  };
+  const wideMeta = (f) => {
+    const bits = [];
+    if (f.kind === "tool" && f.t?.outputBytes != null) bits.push(`${fmt(f.t.outputBytes)}B out`);
+    if (f.kind === "tool" && f.t?.exitCode != null && f.t.exitCode !== 0) bits.push(`exit ${f.t.exitCode}`);
+    if (f.kind === "session") bits.push(`now ${f.s.status}`);
+    bits.push(new Date(f.at).toLocaleTimeString());
+    return bits.join(" · ");
+  };
   $("ticker").innerHTML = shown.slice(0, ACTIVITY_MAX).map((f) => {
     const isNew = !knownFeed.has(f.kind + ":" + f.at + ":" + (f.t?.tool ?? f.s?.id)) && prevFeed.length > 0;
     let l, r, tip;
@@ -443,6 +475,10 @@ function render(state) {
       l = (agent ? harnessMark(agent) + " " + roleIcon(agent) + " " + labelHtml(agent) : harnessMark(t.harness ?? t.sessionId) + " session") +
         ` <span class="act ${err ? "errmark" : "okmark"}">⚡ ${esc(prettyTool(t.tool))} ${t.status ?? ""}</span>`;
       r = [t.outputBytes != null ? `${fmt(t.outputBytes)}B` : "", ago(t.at)].filter(Boolean).join(" · ");
+      if (wide) {
+        const errTxt = f.agent?.lastError && err ? ` — ${esc(f.agent.lastError.message ?? "")}` : "";
+        return `<li class="wide ${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="${esc(tip)}"><span class="w who">${wideWho(f)}</span><span class="w what"><span class="act ${err ? "errmark" : "okmark"}">⚡ ${esc(prettyTool(t.tool))}</span>${t.status ? ` <span class="wst ${ST_CLASS[t.status] ?? ""}">${esc(t.status)}</span>` : ""}${errTxt}</span><span class="w meta">${esc(wideMeta(f))}</span></li>`;
+      }
       return `<li class="${isNew ? "new" : ""}" data-target="${esc(t.sessionId)}" title="${esc(tip)}"><span class="l">${l}</span><span class="dash">-</span><span class="r">${esc(tagged(r, f.agent))}</span></li>`;
     }
     if (f.kind === "error") {
@@ -451,6 +487,9 @@ function render(state) {
       l = harnessMark(s) + " " + roleIcon(s) + " " + labelHtml(s) +
         ` <span class="act errmark">⚠ ${esc(humanType(s.lastError.type))}</span>`;
       r = ago(f.at);
+      if (wide) {
+        return `<li class="wide ${isNew ? "new" : ""}" data-target="${esc(s.id)}" title="${esc(tip)}"><span class="w who">${wideWho(f)}</span><span class="w what"><span class="act errmark">⚠ ${esc(humanType(s.lastError.type))}</span> ${esc(s.lastError.message ?? "")}</span><span class="w meta">${esc(wideMeta(f))}</span></li>`;
+      }
       return `<li class="${isNew ? "new" : ""}" data-target="${esc(s.id)}" title="${esc(tip)}"><span class="l">${l}</span><span class="dash">-</span><span class="r">${esc(tagged(r, s))}</span></li>`;
     }
     const s = f.s;
@@ -458,6 +497,9 @@ function render(state) {
     l = harnessMark(s) + " " + roleIcon(s) + " " + labelHtml(s) +
       ` <span class="act okmark">▶ started · ${esc(s.status)}</span>`;
     r = ago(f.at);
+    if (wide) {
+      return `<li class="wide ${isNew ? "new" : ""}" data-target="${esc(s.id)}" title="${esc(tip)}"><span class="w who">${wideWho(f)}</span><span class="w what"><span class="act okmark">▶ started</span> <span class="wst">${esc(s.status)}</span></span><span class="w meta">${esc(wideMeta(f))}</span></li>`;
+    }
     return `<li class="${isNew ? "new" : ""}" data-target="${esc(s.id)}" title="${esc(tip)}"><span class="l">${l}</span><span class="dash">-</span><span class="r">${esc(tagged(r, s))}</span></li>`;
   }).join("");
   prev = state;

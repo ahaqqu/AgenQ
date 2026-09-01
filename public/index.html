@@ -150,7 +150,7 @@
   ul.todos li.in_progress { color: var(--text); }
   .err { margin-top: 8px; font-size: 11px; color: #ffb3ae; }
   .ticker { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
-  .ticker .thead { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel2); color: var(--dim); font-size: 11px; letter-spacing: 1px; }
+  .ticker .thead { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 10px; background: var(--panel2); color: var(--dim); font-size: 11px; letter-spacing: 1px; }
   #tickerfilter {
     margin-left: auto; background: var(--bg); color: var(--text);
     border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 10px; padding: 1px 6px;
@@ -161,6 +161,23 @@
   .ticker li { display: flex; gap: 10px; padding: 1px 0; color: var(--dim); cursor: pointer; align-items: baseline; }
   .ticker li:hover { background: var(--panel2); }
   .ticker li > span { flex: none; overflow-wrap: anywhere; }
+  /* wide mode (failed panel empty): the feed spans the full row, so rows
+     upgrade from the dash-grammar to explicit columns — who / what / when.
+     Extra room goes to what narrow mode clips into tooltips: project name,
+     full status word, error text, exact timestamps. */
+  .ticker li.wide { gap: 14px; padding: 3px 0; }
+  .ticker li.wide > span { overflow: hidden; text-overflow: ellipsis; }
+  .ticker li.wide .w.who { flex: 0 0 auto; max-width: 34%; max-height: 1.45em; color: var(--text); font-weight: 700; }
+  .ticker li.wide .w.who .proj { font-weight: 700; }
+  .ticker li.wide .w.what { flex: 1 1 0; min-width: 0; color: var(--dim); }
+  .ticker li.wide .w.meta { flex: none; margin-left: auto; color: var(--dim); font-size: 11px; white-space: nowrap; }
+  .ticker .wst {
+    font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px;
+  }
+  .ticker .wst.running { color: var(--run); border-color: var(--run); }
+  .ticker .wst.completed { color: var(--ok); border-color: var(--ok); }
+  .ticker .wst.error { color: var(--fail); border-color: var(--fail); }
+  .ticker .wst.pending { color: var(--dim); }
   .ticker li.new { animation: slidein .5s ease; }
   @keyframes slidein { from { opacity: 0; transform: translateY(-6px); } }
   .errbar { color: var(--fail); font-size: 12px; padding: 0 20px 10px; }
@@ -174,6 +191,9 @@
   @media (max-width: 950px) { .duo { grid-template-columns: 1fr; } }
   .duo .ticker { margin-top: 0; }
   .duo .alert { margin-bottom: 0; }
+  /* wide mode: no failure panel beside the feed, so the grid goes single
+     column and the feed spans the full row */
+  body.feedwide .duo { grid-template-columns: 1fr; }
   .activebar { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
   .chip {
     display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0;
@@ -186,6 +206,14 @@
     padding: 1px 7px; cursor: pointer;
   }
   .chip .convbtn:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+  /* 💬 on agent cards and root heads: same button, card-grammar styling */
+  .kid .convbtn, .head .convbtn {
+    flex: none; background: transparent; color: var(--accent);
+    border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 10px;
+    padding: 1px 6px; cursor: pointer;
+  }
+  .kid .convbtn:hover, .head .convbtn:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+  .head .convbtn { margin-left: 2px; }
   .chip { cursor: pointer; }
   .chip:hover { border-color: var(--accent); }
   .chip.open { border-color: var(--accent); }
