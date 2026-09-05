@@ -114,8 +114,9 @@
   .kid .name { font-weight: 700; }
   .kid .model { color: var(--dim); font-size: 11px; margin-left: auto; }
   /* inline harness origin mark: a boxed letter (Z/H, first letter of the
-     harness id), identical on every item type; the full name is in the
-     tooltip and the legend */
+     harness id), identical on every item type; per-harness accent color is
+     applied inline by harnessStyle() in visuals.js. The full name is in
+     the tooltip and the legend */
   .hmark {
     font-size: 9px; flex: none; cursor: default;
     border: 1px solid var(--line); border-radius: 3px; padding: 0 3px;

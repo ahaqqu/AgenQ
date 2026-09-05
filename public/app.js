@@ -275,7 +275,7 @@ $("legend").innerHTML = `
     <div class="lrow"><span class="ic">🤖</span> other subagent role</div>
     <div class="lrow"><span class="ic">💤</span> idle 5m+ but process still alive</div>
     <div class="lrow"><span class="ic">⚠</span> last error of that agent</div>
-    <div class="lrow"><span class="ic hmark">Z</span> harness mark — every row shows which harness runs the agent (<span id="legend-harnesses"></span>)</div>
+    <div class="lrow"><span class="ic hmark" style="${harnessStyle("zcode")}">Z</span> harness mark — every row shows which harness runs the agent (<span id="legend-harnesses"></span>)</div>
     <div class="lrow"><span class="ic">⏹</span> kill process — stops every live process of that project run (the whole run stops)</div>
   </div>`;
 
@@ -285,7 +285,7 @@ function renderLegendHarnesses(harnesses) {
   const row = $("legend-harnesses");
   if (!row) return;
   row.innerHTML = (harnesses ?? []).map((h) =>
-    `<span title="harness: ${esc(h.id)}"><span class="hmark">${esc(h.id.charAt(0).toUpperCase())}</span> ${esc(h.label)}</span>`
+    `<span title="harness: ${esc(h.id)}"><span class="hmark" style="${harnessStyle(h.id)}">${esc(h.id.charAt(0).toUpperCase())}</span> ${esc(h.label)}</span>`
   ).join(" · ") || "none mounted";
 }
 

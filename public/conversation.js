@@ -68,11 +68,12 @@ async function poll() {
     if (d.error) throw new Error(d.error);
     if (d.title) {
       // prefix = owning harness (zcode:sess_x / hermes:7) — mark it so a
-      // conversation tab is identifiable independent of the board. The
-      // letter matches the board's harness marks (first letter, uppercased).
+      // conversation tab is identifiable independent of the board. Reuses
+      // the board's colored harnessMark so the letter and its accent color
+      // match every other surface.
       const h = id.includes(":") ? id.split(":")[0] : null;
-      document.getElementById("title").textContent =
-        (h ? `[${h.charAt(0).toUpperCase()}] ` : "") + d.title;
+      document.getElementById("title").innerHTML =
+        (h ? harnessMark(h) + " " : "") + esc(d.title);
       document.title = d.title + " — AgenQ live";
     }
     if (d.items?.length) {
