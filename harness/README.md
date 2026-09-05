@@ -89,9 +89,9 @@ registry only namespaces them.
    against that harness's telemetry (SQLite, JSONL, whatever it leaves on
    disk). Give it its own `config.mjs` for flags and defaults, mirroring
    `harness/zcode/config.mjs` — `windowHours` and any `--<harness>-…` paths.
-   The board derives each origin mark (boxed letter, e.g. `Z`, `H`) from the
-   harness id automatically — nothing to configure; the contract's optional
-   `letter` field can override it.
+   The board derives each origin mark (boxed letter, e.g. `Z`, `H`, in a
+   per-harness accent color) from the harness id automatically — nothing to
+   configure; the contract's optional `letter` field can override the letter.
 2. Register it in `harness/index.mjs`.
 3. If it has a stop action, implement `stopRun` and set `hasStop: true`.
 

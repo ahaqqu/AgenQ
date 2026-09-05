@@ -4,9 +4,9 @@ Live mission-control monitor for AI coding-agent harnesses — ZCode and [Hermes
 
 AgenQ reads (read-only) the telemetry harnesses already write on disk and turns it into a live board:
 
-![AgenQ mission control — sessions from ZCode and Hermes merged into one board ordered by recency, every row carrying its harness letter mark (Z = zcode, H = hermes), a recent-activity feed (tool calls, errors, session starts) with a category filter capped at 20 rows — full-width when no failures — failure alerts, and token-burn sparklines against the 200k context cliff; main-session and subagent cards each carry a 💬 button into the live conversation](docs/screenshot.png)
+![AgenQ mission control — sessions from ZCode and Hermes merged into one board ordered by recency, every row carrying its color-coded harness letter mark (blue Z = zcode, orange H = hermes), a recent-activity feed (tool calls, errors, session starts) with a category filter capped at 20 rows — full-width when no failures — failure alerts, and token-burn sparklines against the 200k context cliff; main-session and subagent cards each carry a 💬 button into the live conversation](docs/screenshot.png)
 
-- **One merged board** — sessions from every mounted harness mix in the same tree, ticker, Active Now strip and failure panel, ordered by project and then recency; only the small boxed-letter mark (Z / H, hover for the name) says which harness runs an agent — nothing else is separated
+- **One merged board** — sessions from every mounted harness mix in the same tree, ticker, Active Now strip and failure panel, ordered by project and then recency; only the small boxed-letter mark (a blue Z for zcode, an orange H for hermes — each harness has its own accent color, hover for the name) says which harness runs an agent — nothing else is separated
 - **Agent tree** — the manager session with every dispatched subagent under it (role, model, live status)
 - **Token-burn sparklines** — input tokens per request per agent, with a dashed marker at the 200K context cliff (the cliff that cost 36M tokens in the run that motivated this tool — see ahaqqu/agentic-project-template#94)
 - **Live todos** — each agent's todo list, animated as it progresses
@@ -65,7 +65,7 @@ bun monitor.mjs --port 8787 --window-hours 12 \
 
 ## Where the data comes from
 
-AgenQ is harness-agnostic: any tool that runs AI coding sessions can appear on the board by mounting a **harness adapter**. ZCode and Hermes ship adapters; others plug in the same way — see [`harness/README.md`](harness/README.md) for the adapter contract. The registry namespaces every session id by harness (`zcode:sess_…`, `hermes:2026…`), merges all harnesses into one board, and routes the lazy per-session endpoints to the harness that owns the id. Every board item carries a harness origin mark (boxed first letter of the harness id — Z, H), so a growing set of harnesses stays readable without ever splitting the board.
+AgenQ is harness-agnostic: any tool that runs AI coding sessions can appear on the board by mounting a **harness adapter**. ZCode and Hermes ship adapters; others plug in the same way — see [`harness/README.md`](harness/README.md) for the adapter contract. The registry namespaces every session id by harness (`zcode:sess_…`, `hermes:2026…`), merges all harnesses into one board, and routes the lazy per-session endpoints to the harness that owns the id. Every board item carries a harness origin mark (boxed first letter of the harness id in a per-harness accent color — a blue Z, an orange H; unknown harnesses get a stable hue hashed from their id), so a growing set of harnesses stays readable without ever splitting the board.
 
 Adapters can only surface what a harness's telemetry records — and they record different things. [docs/harness-data-parity.md](docs/harness-data-parity.md) is the honest ledger: what each board slot maps to per harness, what is inherently unknowable, what is recoverable with adapter work, and what AgenQ deliberately does not read.
 
