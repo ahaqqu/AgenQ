@@ -101,6 +101,13 @@ function currentActivity(s) {
   return "…";
 }
 
+// live time: from session start to its last activity (not to now — an idle
+// session shows the span it was actually alive, per its own timestamps)
+function liveDur(s) {
+  if (s?.firstAt == null) return "";
+  return dur(Math.max(s.lastAt ?? 0, s.firstAt) - s.firstAt);
+}
+
 let prev = null;
 let filterProject = "all";
 let activityFilter = "all"; // recent-activity feed: all | tool | error | session
@@ -132,6 +139,9 @@ function treeHead(root, kids) {
   const ch = sumIn > 0 ? sum((s) => s.cacheRead) / sumIn : null;
   const running = all.filter((s) => s.status === "running").length;
   const lastAt = Math.max(0, ...all.map((s) => s.lastAt ?? 0));
+  // run live time: first session start → last activity across the whole run
+  const firstStart = Math.min(...all.map((s) => s.firstAt ?? Infinity));
+  const runDur = Number.isFinite(firstStart) ? dur(Math.max(lastAt, firstStart) - firstStart) : "";
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = root.status === "failed" && root.live === false ? "exited" : root.status;
   return `
@@ -139,7 +149,7 @@ function treeHead(root, kids) {
     ${harnessMark(root)}
     ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
     <span class="title">${esc(root.title ?? "main session")}</span>
-    <span class="meta">${ch != null ? `ch <span class="st ${chCls(ch)}">${(ch * 100).toFixed(2)}%</span> · ` : ""}in <b>${fmt(sumIn)}</b> · out <b>${fmt(sum((s) => s.outputTokens))}</b> · reqs <b>${fmt(sum((s) => s.requests))}</b> · ${kids.length} spawned${running ? ` · ${running} running` : ""} · active ${ago(lastAt)}</span>`;
+    <span class="meta">${ch != null ? `ch <span class="st ${chCls(ch)}">${(ch * 100).toFixed(2)}%</span> · ` : ""}in <b>${fmt(sumIn)}</b> · out <b>${fmt(sum((s) => s.outputTokens))}</b> · reqs <b>${fmt(sum((s) => s.requests))}</b> · ${kids.length} spawned${running ? ` · ${running} running` : ""}${runDur ? ` · live ${runDur}` : ""} · active ${ago(lastAt)}</span>`;
 }
 
 function agentCard(s, showHarness = true) {
@@ -154,6 +164,7 @@ function agentCard(s, showHarness = true) {
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
   const todoHtml = todoListHtml(s);
+  const live = liveDur(s);
   return `
   <div class="kid" id="kid-${s.id}">
     <div class="row">
@@ -165,7 +176,7 @@ function agentCard(s, showHarness = true) {
       <button class="convbtn" data-conv="${esc(s.id)}" title="open the live conversation in a new tab">💬</button>
     </div>
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
-    <div class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</div>
+    <div class="when">${s.status === "sleep" ? "💤 " : ""}${live ? `<span class="live" title="live time: session start → last activity">⏱ ${esc(live)}</span> · ` : ""}${ago(s.lastAt)}</div>
     <div class="nums"><span class="stats">${statsHtml(s)}</span></div>
     ${sparkHtml(s)}
     ${todoHtml ? `<ul class="todos">${todoHtml}</ul>` : ""}
