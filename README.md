@@ -15,6 +15,7 @@ AgenQ reads (read-only) the telemetry harnesses already write on disk and turns 
 
 ![AgenQ live conversation — a subagent's session, opened from its card's 💬 button and streaming](docs/screenshot-conversation.png)
 - **Recent activity** — tool calls, session errors and session starts in one feed (capped at 20 rows), filterable by category; when the failure panel is empty the feed takes the full row width and each row shows more: project, status word, output size and exact timestamps (the failed panel side stays empty in that mode)
+- **Freeze** — the live pill (top right) is a button: click it to pause all board updates (board, detail panel, recent-activity feed) at the current moment — for reading long todos, comparing numbers between runs or taking screenshots; the pill turns amber and shows when it froze, click again to resume, refreshing at once
 - **Failure alerts** — rate limits and crashed agents turn red the moment they happen; a hollow dot means the process already exited
 
 ## Run it

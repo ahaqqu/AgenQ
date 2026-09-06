@@ -115,6 +115,7 @@ let harnessById = new Map(); // harness id -> { id, label, emoji, hasStop }
 let flashId = null; // banner click → highlight this card until flashUntil
 let flashUntil = 0;
 const stoppedDirs = new Set(); // projects the user stopped this page-load
+let frozen = false; // live-pill click: pause re-renders — read the board or screenshot it
 
 // showHarness: only for cards outside a marked section (the "other
 // sessions" bucket) — cards under a root inherit the root head's mark,
@@ -543,9 +544,11 @@ function render(state) {
 }
 
 async function poll() {
+  if (frozen) return; // paused by the live pill — leave the board exactly as it is
   try {
     const res = await fetch("/api/state");
     const state = await res.json();
+    if (frozen) return; // frozen mid-flight — discard this tick, board stays as-is
     render(state);
     // keep the open detail panel fresh (fetchDetail throttles to DETAIL_TTL_MS)
     if (expandedId) fetchDetail(expandedId);
@@ -560,3 +563,17 @@ async function poll() {
 }
 poll();
 setInterval(poll, 1500);
+
+// the live pill doubles as the freeze control: while frozen nothing is
+// fetched or re-rendered (board, detail panel, ticker all hold still), so
+// the numbers can be read, compared or screenshotted; resuming polls at once
+function setFrozen(v) {
+  frozen = v;
+  $("poll").classList.toggle("frozen", frozen);
+  if (frozen) {
+    $("poll-text").textContent = "frozen at " + new Date().toLocaleTimeString() + " — click to resume";
+  } else {
+    poll();
+  }
+}
+$("poll").addEventListener("click", () => setFrozen(!frozen));
