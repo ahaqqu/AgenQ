@@ -37,6 +37,7 @@ Statuses were taken from what the schemas offer at the time of writing
 | Context used (maxContext) | exact: `MAX(model_usage.input_tokens)` per request | per-call **average** `input/api_call_count` per task | **inherent**: no per-request peak in hermes; the average under-measures a spiky request |
 | Status running/sleep | `model_usage` recency + live `/proc` scan | `session_model_usage.last_seen` / `last_activity_at` recency | **parity** (recency); differs in liveness, next row |
 | Liveness / exited | per-directory `/proc` scan of `zcode-cli` processes | not claimed — sessions live in shared gateway/daemon processes | **inherent**: no safe per-session kill or pid mapping. `live` stays `null`; no exit dimming, no stop button |
+| Live duration (⏱ on cards, `live …` in run headers) | `MIN(started_at)` → `MAX(completed_at)` across request rows (+ agents-dir timestamps) | `sessions.started_at` → `last_activity_at` | **parity** — both fill `firstAt`/`lastAt`; the span is computed client-side |
 | Stop action | project-level SIGTERM via `/proc` | none — `hasStop: false` | **inherent** (deliberate: no safe surface) |
 | Done vs failed | per-request `status` / `error_type` in `model_usage` | `ended_at` + `handoff_error` / `compression_failure_error` | **inherent difference in granularity**, mapped to the same vocabulary |
 | Todos | `todo` table (per session, positioned) | `messages` rows `tool_name='todo'` (latest list per session) | **parity** |

@@ -53,6 +53,14 @@ function ago(ts) {
   if (s < 5400) return Math.round(s / 60) + "m ago";
   return Math.round(s / 3600) + "h ago";
 }
+// a time span for people: 45s / 40m / 2h 15m — card live time, run length
+function dur(ms) {
+  if (!ms || ms < 0) return "";
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return Math.max(1, Math.round(ms / 1000)) + "s";
+  const h = Math.floor(m / 60);
+  return h ? h + "h " + (m % 60) + "m" : m + "m";
+}
 function agoLong(ts) {
   if (!ts) return "—";
   const m = Math.floor(Math.max(0, Date.now() - ts) / 60000);
