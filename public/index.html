@@ -96,15 +96,32 @@
   .root { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
   .root > .head {
     padding: 10px 14px; background: var(--panel2); display: flex; gap: 12px; align-items: baseline;
-    cursor: default;
+    cursor: default; border-bottom: 1px solid var(--line);
   }
-  .head .title { font-weight: 700; }
+  .head .title { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .head .model { color: var(--dim); font-size: 11px; }
   /* token stats ride the right edge, like the active-now chips */
   .head .meta { flex: 0 1 auto; margin-left: auto; min-width: 20ch; max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
   .head .meta { color: var(--dim); font-size: 11px; }
   .head .meta b { color: var(--text); font-weight: 400; }
   .kids { padding: 10px 12px 14px; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+  /* the run tree: main session card hangs off the header on the left,
+     subagent cards fill the grid to its right. Same card anatomy everywhere;
+     the main card drops its top border/radius so it reads as connected to
+     the summary header above it */
+  .treegrid { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); align-items: start; }
+  .maincol { padding: 0 10px 14px 0; min-width: 0; }
+  .maincol .kid { background: var(--panel2); border-top: 0; border-left: 0; border-top-left-radius: 0; border-top-right-radius: 0; border-bottom-left-radius: 0; }
+  .maincol .kid .mainname {
+    flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .maincol .kid .model { flex: none; white-space: nowrap; }
+  @media (max-width: 1100px) {
+    .treegrid { grid-template-columns: 1fr; }
+    .maincol { padding: 0 12px 14px; }
+    .maincol .kid { border-left: 1px solid var(--line); border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+  }
   .kid {
     border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
     padding: 10px 12px; transition: border-color .4s, box-shadow .4s;

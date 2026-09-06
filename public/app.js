@@ -112,31 +112,62 @@ const stoppedDirs = new Set(); // projects the user stopped this page-load
 // showHarness: only for cards outside a marked section (the "other
 // sessions" bucket) — cards under a root inherit the root head's mark,
 // so repeating the letter on every subagent card is noise
+function todoListHtml(s) {
+  return (s.todos ?? []).slice(0, 8).map((t) =>
+    `<li class="${esc(t.status)}">${t.status === "done" ? "☑" : t.status === "in_progress" ? "▸" : "☐"} ${esc(t.content)}</li>`
+  ).join("");
+}
+
+function sparkHtml(s) {
+  return `<canvas class="spark" id="spark-${s.id}" title="Token use per request. The dashed red line is the ${(CTX_LIMIT / 1000).toFixed(1)}k context cliff — past it the line turns red.&#10;x-axis: requests, oldest to newest (last 120, spaced by request order, not by time)&#10;y-axis: input tokens, 0 up to the ${(CTX_LIMIT / 1000).toFixed(1)}k cliff"></canvas>`;
+}
+
+// root head = run summary: carries the session title plus sums over the
+// main session + every spawned subagent, so the strip identifies the run
+// and its totals while each card below keeps its own numbers
+function treeHead(root, kids) {
+  const all = [root, ...kids];
+  const sum = (f) => all.reduce((a, s) => a + (f(s) ?? 0), 0);
+  const sumIn = sum((s) => s.inputTokens);
+  const ch = sumIn > 0 ? sum((s) => s.cacheRead) / sumIn : null;
+  const running = all.filter((s) => s.status === "running").length;
+  const lastAt = Math.max(0, ...all.map((s) => s.lastAt ?? 0));
+  // a dead run's failure keeps its red dot but stops pulsing
+  const dot = root.status === "failed" && root.live === false ? "exited" : root.status;
+  return `
+    <span class="status ${esc(dot)}" title="${esc(root.status)}${root.live === false ? " · process exited" : ""}"></span>
+    ${harnessMark(root)}
+    ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
+    <span class="title">${esc(root.title ?? "main session")}</span>
+    <span class="meta">${ch != null ? `ch <span class="st ${chCls(ch)}">${(ch * 100).toFixed(2)}%</span> · ` : ""}in <b>${fmt(sumIn)}</b> · out <b>${fmt(sum((s) => s.outputTokens))}</b> · reqs <b>${fmt(sum((s) => s.requests))}</b> · ${kids.length} spawned${running ? ` · ${running} running` : ""} · active ${ago(lastAt)}</span>`;
+}
+
 function agentCard(s, showHarness = true) {
-  const name = s.role ?? (s.title ? "main" : "session");
-  const sparkId = "spark-" + s.id;
+  // main sessions render through the same card as subagents; project,
+  // harness mark and title live in the tree header above, so the card
+  // just says "main" the way subagent cards say their role
+  const isMain = !s.role;
+  const name = isMain ? "main" : s.role;
   const modelHtml = [s.model, s.thinking && `[${s.thinking}]`].filter(Boolean).join(" ");
   // icon grammar everywhere: status dot → harness mark → role icon → name
   const harnessBadge = showHarness ? harnessMark(s) : "";
   // a dead run's failure keeps its red dot but stops pulsing
   const dot = s.status === "failed" && s.live === false ? "exited" : s.status;
-  const todoHtml = (s.todos ?? []).slice(0, 8).map((t) =>
-    `<li class="${esc(t.status)}">${t.status === "done" ? "☑" : t.status === "in_progress" ? "▸" : "☐"} ${esc(t.content)}</li>`
-  ).join("");
+  const todoHtml = todoListHtml(s);
   return `
   <div class="kid" id="kid-${s.id}">
     <div class="row">
       <span class="status ${esc(dot)}" title="${esc(s.status)}${s.live === false ? " · process exited" : ""}"></span>
       ${harnessBadge}
       <span>${roleIcon(s)}</span>
-      <span class="name">${esc(name)}</span>
+      <span class="name${isMain ? " mainname" : ""}">${esc(name)}</span>
       <span class="model">${esc(modelHtml)}</span>
       <button class="convbtn" data-conv="${esc(s.id)}" title="open the live conversation in a new tab">💬</button>
     </div>
     ${s.description ? `<div class="desc" title="${esc(s.description)}">${esc(s.description)}</div>` : ""}
     <div class="when">${s.status === "sleep" ? "💤 " : ""}${ago(s.lastAt)}</div>
     <div class="nums"><span class="stats">${statsHtml(s)}</span></div>
-    <canvas class="spark" id="${sparkId}" title="Token use per request. The dashed red line is the ${(CTX_LIMIT / 1000).toFixed(1)}k context cliff — past it the line turns red.&#10;x-axis: requests, oldest to newest (last 120, spaced by request order, not by time)&#10;y-axis: input tokens, 0 up to the ${(CTX_LIMIT / 1000).toFixed(1)}k cliff"></canvas>
+    ${sparkHtml(s)}
     ${todoHtml ? `<ul class="todos">${todoHtml}</ul>` : ""}
     ${s.lastError ? `<div class="err">⚠ ${esc(humanType(s.lastError.type))}: ${esc(s.lastError.message ?? "")}${s.live === false ? " · run exited" : ""}</div>` : ""}
     ${s.lastError && s.directory && stoppedDirs.has(s.directory) ? `<div class="stoppedmark">⏹ stopped by you — project run killed</div>` : ""}
@@ -393,17 +424,11 @@ function render(state) {
     kids.forEach((k) => seen.add(k.id));
     sections.push(`
       <div class="root" id="root-${esc(root.id)}">
-        <div class="head">
-          <span class="status ${esc(root.status === "failed" && root.live === false ? "exited" : root.status)}" title="${esc(root.status)}${root.live === false ? " · process exited" : ""}"></span>
-          ${harnessMark(root)}
-          <span>🧑‍✈️</span>
-          ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
-          <span class="title">${esc(root.title ?? "main session")}</span>
-          <span class="model">${esc([root.model, root.thinking && `[${root.thinking}]`].filter(Boolean).join(" "))}</span>
-          <button class="convbtn" data-conv="${esc(root.id)}" title="open the live conversation in a new tab">💬</button>
-          <span class="meta">${statsHtml(root)} · ${root.status === "sleep" ? "💤 " : ""}${ago(root.lastAt)}</span>
+        <div class="head">${treeHead(root, kids)}</div>
+        <div class="treegrid">
+          <div class="maincol">${agentCard(root, false)}</div>
+          <div class="kids">${kids.map((s) => agentCard(s, false)).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
         </div>
-        <div class="kids">${kids.map((s) => agentCard(s, false)).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
       </div>`);
   }
   const orphans = state.sessions.filter((s) => !seen.has(s.id) && matches(s)).sort(byLast);
