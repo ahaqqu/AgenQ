@@ -107,7 +107,7 @@ export function sessionMessages(id, after) {
 
   // an unusable cursor (a foreign format, a hand-made request) becomes a first
   // load rather than being echoed back forever, so the client recovers
-  const cursorSeq = parseCursor(after, CURSOR_PREFIX);
+  const [cursorSeq] = parseCursor(after, CURSOR_PREFIX) ?? [];
   const firstLoad = cursorSeq == null;
 
   let records = recordsOf(path) ?? [];

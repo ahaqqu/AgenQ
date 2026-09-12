@@ -86,13 +86,14 @@ export function killAndWait(pid) {
 // `directory`. Directory validation (is it a project AgenQ actually saw?)
 // belongs to the caller — the server checks it against the last snapshot
 // before dispatching, so an adapter is never an attack surface for arbitrary
-// process kills. Returns { killed, directory, project }; throws if no live
-// CLI process exists for the directory.
+// process kills. Returns { killed, directory, project }; a run that already
+// exited is a user-facing condition, not an unexpected failure, so it comes
+// back as { error } (the server answers 400) rather than throwing.
 export function stopRun(directory, { sessions }) {
   const project = sessions.find((x) => x.directory === directory)?.project ?? directory;
   const pids = gatherLiveProcs().get(directory) ?? [];
   if (!pids.length) {
-    throw new Error(`no live zcode-cli process in ${directory} — run already exited`);
+    return { killed: [], directory, project, error: `no live zcode-cli process in ${directory} — run already exited` };
   }
   const killed = [];
   for (const pid of pids) {

@@ -43,8 +43,8 @@ Each entry of `sessions` is one session object:
 | `id` | Namespaced session id; the key every other endpoint takes. |
 | `harness` | Harness id (`zcode`, `hermes`, `deepseek`). |
 | `title`, `project`, `directory` | Display title, project name (last path segment) and working directory. |
-| `parentId`, `parentSessionId`, `children` | Tree edges, namespaced like `id`; `roots` at the top level holds the sessions whose parent is missing (or another harness's, or windowed out). |
-| `role` | Subagent role (`"main"` for a run's manager session, profile name for dispatched subagents). |
+| `parentId`, `parentSessionId`, `children` | Tree edges. `parentId` and `children` are namespaced like `id`; `parentSessionId` is the raw parent id recorded in the subagent's link metadata (zcode), left unnamespaced. `roots` at the top level holds the sessions whose parent is missing (or another harness's, or windowed out). |
+| `role` | Subagent profile name for dispatched subagents (from link metadata), `null` otherwise — the UI renders a manager session as "main" client-side. |
 | `model`, `thinking` | Model id and thinking level of the session's most recent request. |
 | `status` | `running`, `sleep`, `done`, `failed`, `exited`, `idle`. |
 | `live` | `true`/`false` when liveness was observed from the OS process table, `null` when the harness has no process signal. |
@@ -52,7 +52,7 @@ Each entry of `sessions` is one session object:
 | `firstAt`, `lastAt` | First and latest activity, epoch ms — the ⏱ duration and the active/idle decision both derive from these. |
 | `sparkline` | Input tokens per request, oldest first, capped at the last 120 points. |
 | `lastError` | `{ type, message, at }` for the most recent failure, or `null` — an error older than the last successful request is cleared (the session recovered). |
-| `todos` | `[{ content, status }]` with statuses `todo` / `doing` / `done`. |
+| `todos` | `[{ content, status }]` with statuses `pending` / `in_progress` / `done`. |
 | `lastTool` | `{ name, outputBytes, status, at }` for the session's most recent tool call. |
 | `linkStatus`, `description` | Subagent link metadata from the agents dir (only on sessions that have one). |
 
@@ -91,7 +91,9 @@ summary (`diff: null`), and fields a harness cannot observe are `null`/empty
 rather than absent. `modelWindow` is the context-window estimate used by the
 fill gauge (the model's real window when recorded, 200k fallback otherwise).
 
-Returns 404 when the session id is unknown or its harness offers no detail.
+Returns 404 only when the harness is unknown or offers no detail; an
+unknown session under a mounted harness returns the empty shape with 200
+(adapters fill in whatever that session's telemetry allows).
 
 ## GET /api/session/:id/messages?after=:cursor
 
@@ -101,9 +103,10 @@ come back, so a poll moves bytes proportional to what was said since, not to
 the size of the session.
 
 Without `after` (first load): the newest 400 conversation rows, oldest-first.
-With `after`: up to 400 rows after the cursor. The cursor is an opaque string
-(`<prefix>:<n>` on most harnesses, plain numeric on zcode) — treat it as a
-token, echo it back verbatim. A missing or unusable cursor is read as a first
+With `after`: up to 400 rows after the cursor. The cursor is an opaque tagged
+string — `<prefix>:<numbers>`, where the numbers are one position per
+harness (e.g. `m:15` on hermes, `z:42:7` on zcode) — treat it as a token,
+echo it back verbatim. A missing or unusable cursor is read as a first
 load, so a tab holding a stale cursor recovers on its next poll.
 
 ```json
@@ -111,7 +114,7 @@ load, so a tab holding a stale cursor recovers on its next poll.
   "sessionId": "zcode:a1b2c3",
   "title": "Fix the login bug",
   "directory": "/home/me/proj",
-  "cursor": "42:7",
+  "cursor": "z:42:7",
   "items": [
     { "kind": "text",  "role": "user",      "text": "…", "at": 1789238940000 },
     { "kind": "think", "role": "assistant", "text": "…tail of thinking…", "at": 1789238940100 },
@@ -124,7 +127,8 @@ load, so a tab holding a stale cursor recovers on its next poll.
 `kind` is `text`, `think` or `tool`; scaffolding records (step-start,
 compaction, …) are filtered out server-side. Long text is capped per item
 (12k for text, 6k for thinking, 2k for tool input), keeping the *end* of the
-text — the live half. Returns 404 for an unknown session or harness.
+text — the live half. Returns 404 for an unknown or unnamespaced harness id;
+an unknown session under a mounted harness returns an empty feed with 200.
 
 ## POST /api/stop
 
@@ -139,14 +143,14 @@ Request: `Content-Type: application/json`, body `{"sessionId": "zcode:a1b2c3"}`
 or `{"directory": "/home/me/proj"}`.
 
 ```json
-{ "harnessId": "zcode", "killed": [12345, 12346] }
+{ "harnessId": "zcode", "killed": [12345, 12346], "directory": "/home/me/proj", "project": "proj" }
 ```
 
 Guardrails and error responses:
 
 - 403 for cross-origin or non-JSON requests (Origin + Content-Type check).
-- 400 for an unknown session/directory, or a harness whose `hasStop` is
+- 400 for an unknown session/directory, a harness whose `hasStop` is
   false — hermes and DeepSeek Harness sessions live inside shared gateway
-  processes, so they never offer a stop.
+  processes, so they never offer a stop — or a run that already exited.
 - 400 with the adapter's own `error` when the native stop fails.
 - 500 only for an unexpected exception.
