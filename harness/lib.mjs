@@ -48,6 +48,17 @@ export function parseCursor(after, prefix) {
   return m ? Number(m[1]) : null;
 }
 
+// zcode's conversation cursor is a pair — the (message-sequence, part-sequence)
+// of the last row seen, "<mseq>:<pseq>" (untagged: zcode predates the prefixes
+// the other feeds tag their cursors with). Same recovery rule as parseCursor:
+// null means "treat as first load", so a foreign or hand-made cursor recovers
+// on the next poll instead of replaying from a nonsense offset.
+export function parsePairCursor(after) {
+  if (after == null) return null;
+  const m = /^(\d+):(\d+)$/.exec(String(after));
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
 // project = last path segment of the session's working directory
 export const projectFromDir = (dir) =>
   dir ? (dir.split("/").filter(Boolean).pop() ?? null) : null;

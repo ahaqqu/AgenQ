@@ -3,7 +3,7 @@
 // DB connection and are only hit when the UI asks for a specific session.
 import { Database } from "bun:sqlite";
 import { cfg } from "./config.mjs";
-import { CONV_INPUT_CAP, CONV_TAIL, CONV_TEXT_CAP, CONV_THINK_CAP } from "../lib.mjs";
+import { CONV_INPUT_CAP, CONV_TAIL, CONV_TEXT_CAP, CONV_THINK_CAP, head, modelWindow, parsePairCursor, tail } from "../lib.mjs";
 
 function roDb() {
   try {
@@ -19,18 +19,6 @@ function rows(db, sql, params = []) {
 }
 
 // ---------- per-session detail (lazy — only read when the UI expands a row) ----------
-
-// Context-window estimates for the fill gauge; unmatched models fall back to
-// the same 200k cliff the sparkline uses.
-const MODEL_WINDOWS = [
-  [/glm/i, 200_000],
-  [/kimi/i, 256_000],
-  [/deepseek/i, 128_000],
-];
-const modelWindow = (model) => MODEL_WINDOWS.find(([re]) => re.test(model ?? ""))?.[1] ?? 200_000;
-
-const tail = (s, n) => { s = String(s ?? ""); return s.length > n ? "…" + s.slice(-n) : s; };
-const head = (s, n) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n) + " …" : s; };
 
 export function sessionDetail(id) {
   const db = roDb();
@@ -169,9 +157,11 @@ export function sessionMessages(id, after) {
     const sess = rows(db, `SELECT title, directory FROM session WHERE id = ?`, [id])[0] ?? null;
     let cursor = after ?? "0:0";
     let parts;
-    if (after) {
-      const [a, b] = String(after).split(":").map(Number);
-      const from = [Number.isFinite(a) ? a : 0, Number.isFinite(b) ? b : 0];
+    // An unusable cursor (a foreign format, a hand-made request) becomes a
+    // first load — the client adopts the fresh cursor we return and recovers
+    // on this poll, instead of resuming from a nonsense offset.
+    const from = parsePairCursor(after);
+    if (from) {
       parts = rows(db, `${convSel}
         WHERE p.session_id = ?
           AND (coalesce(m.sequence,0), coalesce(p.sequence,0)) > (?, ?)
