@@ -3,7 +3,7 @@
 ## Pull requests
 
 Both gates below apply to PRs that change the running app — a diff touching any
-of `monitor.mjs`, `harness/**`, `public/**`, `scripts/**`, `install.sh` or
+of `monitor.mjs`, `harness/**`, `public/**`, `install.sh` or
 `package.json`. A PR that touches none of them (docs, skills, agent-instruction
 files) has no rendered behavior to verify and no README surface to update: say
 that in the PR description instead of running the app.
