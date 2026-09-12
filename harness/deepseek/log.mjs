@@ -32,6 +32,7 @@ const GENERATION_RE = /^session(?:\.v(\d+))?\.jsonl(\.zstd)?$/;
 
 const SPARK_TAIL = 120; // sparkline points kept per agent
 const CALLS_TAIL = 150; // tool calls kept per agent (ticker + chip status/args)
+const READ_WINDOW = 8 * 1024 * 1024; // bytes decoded per read pass
 const RECORDS_TAIL = 400; // conversation records kept per subscribed session
 const TAIL_SUBSCRIBERS = 6; // sessions whose conversation records stay in memory
 const RECENT_USAGE = 5; // model calls kept for the detail panel's turn rows
@@ -514,8 +515,13 @@ export function readSession(path, { collect = false, reset = false } = {}) {
   if (collect && !entry.records) entry.records = [];
   if (collect) entry.tailUsed = ++useClock;
   entry.used = ++useClock;
-  if (st.size > entry.size) {
-    const chunk = readRange(path, entry.size, st.size - entry.size);
+  // Read in bounded windows rather than one buffer the size of the delta: a
+  // session log can be hundreds of MB, and nothing here needs more than the
+  // current window plus whatever partial frame is still being appended.
+  while (st.size > entry.size) {
+    const chunk = readRange(path, entry.size, Math.min(READ_WINDOW, st.size - entry.size));
+    if (!chunk.length) break; // file truncated under us; next poll resets
+    entry.size += chunk.length;
     const buf = entry.pending.length ? Buffer.concat([entry.pending, chunk]) : chunk;
     if (path.endsWith(".zstd")) {
       const { text, rest } = decodeFrames(buf);
@@ -525,7 +531,6 @@ export function readSession(path, { collect = false, reset = false } = {}) {
       consume(entry, buf.toString("utf8"));
       entry.pending = Buffer.alloc(0);
     }
-    entry.size = st.size;
   }
   if (collect) evictTails();
   evictLogs();
