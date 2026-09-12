@@ -26,40 +26,40 @@ Under the manager-orchestrated loop, the `reviewer` role applies this skill and 
 
 ## Philosophy alignment
 
-For each principle in `docs/ARCHITECTURE.md`, check if the PR upholds or violates it:
+For each principle below, check if the PR upholds or violates it:
 
-- **Cost**: Does the PR add paid dependencies? Does it move compute to the edge that belongs on the client?
-- **Local-first**: Does the PR preserve CRDT merge semantics? Does it block the UI on network?
-- **Performance**: Does the PR increase bundle size? Does it add runtime CSS-in-JS?
-- **Cross-Platform**: Does the PR introduce platform-specific code?
-- **Polished**: Does the PR include i18n for `en` + `id`? Does it consider accessibility?
-- **Secure**: Does the PR touch auth, payments, or external boundaries without Valibot validation from `@app/contracts`?
-- **Observable**: Does the PR add logging without the Logger adapter?
-- **Maintainable**: Does the PR access `env.*` directly? Does it add Cloudflare-specific types to business logic? Does it change schema without migrations?
-- **Available**: Does the PR fail hard instead of degrading gracefully?
-- **Reliable**: Does the PR lack tests for changed logic? Does it reduce coverage?
-- **Reproducible**: Does the PR introduce tools not in the Nix flake?
-- **Agentic**: Are files small and self-describing? Are contracts clear?
+- **Cost**: Does the PR add a paid service or a metered external API to the critical path of a monitor that is meant to run free and offline?
+- **Local-first**: Does the PR keep every telemetry read local and read-only (DBs opened `mode=ro` per poll, log/config/state files only read)? Does it bind `127.0.0.1` and avoid network egress, rather than blocking the board on a remote call?
+- **Performance**: Does the PR add a full-file read to a poll, block the serving loop, or break the lazy per-session detail/conversation path? Does it respect the ~1.5s snapshot and ~2s conversation cadence and the DSH incremental frame decode (only frames appended since the previous poll; untouched logs skipped entirely)?
+- **Harness-agnostic**: Does the PR keep harness-specific logic inside `harness/<id>/`, let the registry namespace ids (`zcode:`, `hermes:`, `deepseek:`), and add a new harness as an adapter directory plus one registry entry with no frontend change? Does core import harness internals? (Linux is the supported platform by design — `/proc`, `flock`, `install.sh`.)
+- **Polished**: Does the PR change UI without retaking the README screenshots whole-page (freeze the live pill, pin the sticky top bar to normal flow) and updating their alt text? Does it consider the board's keyboard/scroll behavior?
+- **Secure**: Does the PR widen the stop-run write path — offering it for a harness without `hasStop: true`, dropping below project-level granularity, losing the confirmation that names the harness and process count, skipping SIGTERM for SIGKILL, or accepting a cross-origin request?
+- **Observable**: Does the PR degrade silently instead of reporting through the snapshot's `warnings` — a damaged frame, a skipped log, a refused read that the board never mentions?
+- **Maintainable**: Does the PR leak harness specifics into core, put logic in the wrong layer, or sprawl a module that should be split by responsibility the way `frames`/`fold`/`log` split the DSH adapter?
+- **Available**: Does the PR fail the poll instead of failing empty — does `snapshot()` throw on a missing or empty installation, or does one damaged DSH frame silence the rest of a session?
+- **Reliable**: Does the PR change behavior without the AGENTS.md browser smoke test (board renders, project filter, an Active Now chip opens the lazy detail panel, the 💬 button streams the live conversation) and without the result recorded in the PR description?
+- **Reproducible**: Does the PR add a tool or a step outside Bun ≥ 1.1 and the zero-build `install.sh` path? Are `package.json` and `bun.lock` changed together?
+- **Agentic**: Are files small and self-describing? Are the adapter contract and snapshot shape clear? Does `docs/harness-data-parity.md` stay truthful about what each harness can and cannot supply?
 
 ## Guardrail compliance
 
-For each changed file, verify against `AGENTS.md` universal guardrails and the `guided-implementation` domain checklist:
+For each changed file, verify against these guardrails:
 
-- External service access uses adapters in `packages/infra`. No direct `env.*` access.
-- Routes have Valibot schemas in `packages/contracts` (`@app/contracts`), use `hono-openapi`, and are under `/v1/`.
-- Database changes include raw SQL migrations in `apps/api/migrations/`, client migrations in `packages/local-first`, and a `SCHEMA_VERSION` bump.
-- User-facing strings are externalized for `en` and `id`. No hardcoded copy.
-- Dates, numbers, and currency use the `Intl` API.
-- Styling uses Tailwind CSS only. No runtime CSS-in-JS.
-- Sync logic uses the custom LWW-element-set CRDT in `packages/local-first` (`mergeNotes`). Tinybase is not used.
-- Sync retries with exponential backoff; requests carry `schemaVersion` and `clientVersion`.
-- Logging uses the Logger adapter with structured JSON. No `console.log`.
-- SQL uses only standard features. No SQLite-specific or D1-specific extensions.
-- Session storage uses D1. No KV write-path.
-- Dependencies are free-tier compatible. No paid services in the critical path.
-- Secrets are injected via `wrangler secret`. Nothing committed to the repo.
-- Files are 300 lines or fewer with 5 or fewer direct dependencies.
-- Webhook handlers verify signatures before parsing; are idempotent.
+- Telemetry is read-only: SQLite DBs opened `mode=ro` per poll, log/config/state files only ever read, nothing written back to a harness.
+- The server binds `127.0.0.1` only; no outbound network calls; no secrets committed.
+- Adapters implement the `harness/<id>/index.mjs` contract in `harness/README.md`; a new harness is one adapter directory plus one registry entry in `harness/index.mjs`.
+- Session ids are namespaced by the registry (`zcode:`, `hermes:`, `deepseek:`); adapters deal in raw ids and emit their own `parentId`/`children` tree edges.
+- `snapshot()` returns the empty shape for a missing or empty installation and never throws on it; damaged or refused data is reported in `warnings`.
+- A genuinely broken telemetry read throws, so the registry records a per-harness failure and surfaces it as a board warning.
+- Status values come from the shared vocabulary (`running`, `sleep`, `done`, `failed`, `idle`, `exited`); `done`/`exited` mapping is the adapter's responsibility.
+- Routes are the `monitor.mjs` API surface (`/api/state`, `/api/session/:id/detail`, `/api/session/:id/messages`, `POST /api/stop`); per-session endpoints stay lazy.
+- Poll cadence is preserved (snapshot ~1.5s, conversation ~2s); no full-file read is added to a poll.
+- DSH logs are decoded incrementally — only frames appended since the previous poll, untouched logs skipped — and a damaged frame is dropped without losing the events after it.
+- Styling is plain CSS in `public/index.html` with vanilla JS in `public/`; no framework, bundler, or runtime CSS-in-JS.
+- Runtime dependency count stays zero; Bun ≥ 1.1 supplies the API and `valibot` stays confined to the ZCode hook payload schema.
+- The stop action exists only where the harness sets `hasStop: true`, only at project level, behind a confirmation naming the harness and process count, with SIGTERM before SIGKILL.
+- The stop endpoint rejects cross-origin requests.
+- `package.json` and `bun.lock` change together, and `install.sh` plus the README flag list stay in sync with any new flag.
 
 ## Posting contract (any PR comment, incl. thermos findings)
 
