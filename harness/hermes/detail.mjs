@@ -3,7 +3,19 @@
 // their own read-only DB connection and are only hit when the UI asks for a
 // specific session.
 import { cfg } from "./config.mjs";
-import { roDb, rows, s2ms, modelWindow, tail, head } from "../lib.mjs";
+import {
+  CONV_INPUT_CAP,
+  CONV_TAIL,
+  CONV_TEXT_CAP,
+  CONV_THINK_CAP,
+  head,
+  modelWindow,
+  parseCursor,
+  roDb,
+  rows,
+  s2ms,
+  tail,
+} from "../lib.mjs";
 import { toolResult } from "./toolresult.mjs";
 
 // ---------- per-session detail (lazy — only read when the UI expands a row) ----------
@@ -118,21 +130,11 @@ export function sessionDetail(id) {
 // rows, and reasoning in dedicated columns. Ordering is `id` (AUTOINCREMENT
 // = insertion order = conversation order). The client polls with the id of
 // the last row it saw, so a poll moves bytes proportional to what was said.
-const CONV_TEXT_CAP = 12_000;
-const CONV_THINK_CAP = 6_000;
-const CONV_INPUT_CAP = 2_000;
-const CONV_TAIL_ROWS = 400; // first load: the last N rows, not the whole session
+// The text caps and the tail length are shared with the other adapters
+// (../lib.mjs) so the three feeds cannot drift.
 
 // hermes cursors are message row ids, prefixed away from zcode's mseq:pseq
 const CURSOR_PREFIX = "m";
-
-// returns the row id, or null for an unusable cursor (garbage degrades to a
-// fresh tail load rather than a silent full replay)
-function parseCursor(after) {
-  if (after == null) return null;
-  const n = Number(String(after).split(":")[1]);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
 
 export function sessionMessages(id, after) {
   const db = roDb(cfg.db);
@@ -143,12 +145,9 @@ export function sessionMessages(id, after) {
       title: sess?.title ?? (sess?.display_name ? String(sess.display_name) : null),
       directory: sess?.cwd ?? null,
     };
-    const resume = parseCursor(after);
-    if (after != null && resume == null) {
-      // garbage cursor: no replay (the client polls every 2s and would
-      // re-download the whole tail forever); echo its cursor back
-      return { ...base, cursor: after, items: [] };
-    }
+    // An unusable cursor becomes a first load (never an echoed-back dead end):
+    // the client adopts the fresh cursor we return and recovers on this poll.
+    const resume = parseCursor(after, CURSOR_PREFIX);
 
     // First load (no cursor): tail the last N rows, oldest first, per the
     // contract. Resume: rows past the cursor in conversation order.
@@ -158,10 +157,10 @@ export function sessionMessages(id, after) {
     const rowsOut = resume == null
       ? rows(db,
           `SELECT ${COLS} FROM messages WHERE session_id = ? AND active = 1
-           ORDER BY id DESC LIMIT ${CONV_TAIL_ROWS}`, [id]).reverse()
+           ORDER BY id DESC LIMIT ${CONV_TAIL}`, [id]).reverse()
       : rows(db,
           `SELECT ${COLS} FROM messages WHERE session_id = ? AND active = 1 AND id > ?
-           ORDER BY id ASC LIMIT ${CONV_TAIL_ROWS}`, [id, resume]);
+           ORDER BY id ASC LIMIT ${CONV_TAIL}`, [id, resume]);
 
     // Tool-call chip ownership. A chip is emitted from the assistant request
     // row (it carries the arguments); the paired result row supplies the
@@ -177,7 +176,7 @@ export function sessionMessages(id, after) {
     const statusById = new Map();
     for (const t of rows(db, `SELECT tool_call_id, content FROM messages
                               WHERE session_id = ? AND role = 'tool' AND active = 1
-                              ORDER BY id DESC LIMIT ${CONV_TAIL_ROWS}`, [id])) {
+                              ORDER BY id DESC LIMIT ${CONV_TAIL}`, [id])) {
       if (t.tool_call_id && !statusById.has(t.tool_call_id)) {
         statusById.set(t.tool_call_id, toolResult(t.content).status);
       }

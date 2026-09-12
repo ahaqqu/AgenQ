@@ -1,4 +1,5 @@
-// Shared adapter kit: the pieces every SQLite-backed harness adapter needs.
+// Shared adapter kit: the pieces every harness adapter needs, plus the small
+// `roDb`/`rows`/`s2ms` SQLite kit the SQLite-backed ones build on.
 // Extracted when the second adapter appeared (see the zcode/hermes review of
 // PR #13) — a new adapter should map telemetry only, never re-derive these.
 import { Database } from "bun:sqlite";
@@ -24,6 +25,28 @@ export const s2ms = (t) => (t == null ? null : Math.round(Number(t) * 1000));
 
 export const tail = (s, n) => { s = String(s ?? ""); return s.length > n ? "…" + s.slice(-n) : s; };
 export const head = (s, n) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n) + " …" : s; };
+
+// Conversation-feed anatomy, one home so the three adapters cannot drift:
+// the per-item text caps every feed applies, and the row/record tail a first
+// load returns (the conversation client says "older messages … not shown"
+// with the same number).
+export const CONV_TEXT_CAP = 12_000;
+export const CONV_THINK_CAP = 6_000;
+export const CONV_INPUT_CAP = 2_000;
+export const CONV_TAIL = 400;
+
+// Parse a conversation cursor — the numeric offset out of "<prefix>:<n>".
+// `prefix` pins the feed that produced it (every non-zcode feed tags its
+// cursors with one); omit it to accept an untagged numeric cursor too.
+// Returns null for an absent or unusable cursor, which every adapter reads
+// as "first load": a tab holding a foreign or hand-made cursor recovers on
+// its next poll instead of replaying nothing forever.
+export function parseCursor(after, prefix) {
+  if (after == null) return null;
+  const re = prefix ? new RegExp(`^${prefix}:(\\d+)$`) : /^(?:[A-Za-z]+:)?(\d+)$/;
+  const m = re.exec(String(after));
+  return m ? Number(m[1]) : null;
+}
 
 // project = last path segment of the session's working directory
 export const projectFromDir = (dir) =>

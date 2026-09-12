@@ -1,48 +1,37 @@
 // AgenQ DeepSeek Harness snapshot assembly: one poll's read-only view of the
 // DSH telemetry on disk. Walks <DSH_HOME>/sessions, folds each session's
 // append-only event log into a board row, and answers the two questions the
-// DSH log itself answers authoritatively: what is live (the kernel's flock
-// table) and what has been archived (the workspace store).
-import { readFileSync, readdirSync, statSync } from "node:fs";
+// DSH installation itself answers authoritatively: what is live (the kernel's
+// flock table) and what has been archived (the workspace store).
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { cfg, WINDOW_MS } from "./config.mjs";
-import { findLogFile, readAggregate, readHeader, zstdAvailable } from "./log.mjs";
+import {
+  SUPPORTED_FORMAT_VERSIONS,
+  corruptBytesOf,
+  findLogFile,
+  listSessionDirs,
+  readAggregate,
+  sessionHeader,
+  zstdAvailable,
+} from "./log.mjs";
+import { newAgg, visibleError } from "./fold.mjs";
 import { keepInWindow, projectFromDir } from "../lib.mjs";
 
 export const ACTIVE_MS = 5 * 60_000; // heartbeat within this = active; idle past it = sleep
-const SPARK_TAIL = 120;
-const TICKER_PER_SESSION = 15;
-
-// Every session directory DSH has materialized, across all projects.
-export function listSessionDirs() {
-  const root = join(cfg.dir, "sessions");
-  const out = [];
-  let projects;
-  try {
-    projects = readdirSync(root, { withFileTypes: true });
-  } catch {
-    return out; // DSH never ran here — empty board, not an error
-  }
-  for (const p of projects) {
-    if (!p.isDirectory()) continue;
-    const projectDir = join(root, p.name);
-    let sessions;
-    try {
-      sessions = readdirSync(projectDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const s of sessions) {
-      if (s.isDirectory()) out.push({ id: s.name, dir: join(projectDir, s.name) });
-    }
-  }
-  return out;
-}
+const TICKER_PER_SESSION = 15; // caps one busy agent's share of the merged ticker
 
 // DSH holds a kernel flock(2) on <session>/session.lock for the whole life of
 // its write handle (see dsh-session-persistence-jsonl/lease). The kernel
 // releases it on process death, so the lock table is a per-session liveness
 // signal no polling heuristic can fake. Read it once per snapshot.
+//
+// Matching is by inode ONLY, deliberately: the lock table's device field is the
+// superblock device (btrfs subvolumes here print 00:1d while stat() reports an
+// anonymous st_dev), so comparing devices would break liveness on exactly the
+// machines this runs on. The residual risk is an inode alias on another
+// filesystem marking a session live — accepted, and cheaper to live with than
+// a liveness check that never matches.
 function heldLockInodes() {
   try {
     const held = new Set();
@@ -95,30 +84,36 @@ function archivedIds() {
 //   idle    — no events at all (a seeded or never-used session)
 // Liveness is exact here (the harness's own write lease), so it outranks
 // recency: a session nothing holds open is never reported as running, however
-// recently it wrote its last event.
+// recently it wrote its last event. When /proc/locks is unavailable the lease
+// is unknown and recency is the fallback.
+//
+// "Clean" is DSH's own turn-end vocabulary minus the two endings that mean the
+// work stopped abnormally: `error` (a structured failure) and `interrupted`
+// (the crash-orphaned closer the loop appends to a repair). `blocked` (a
+// pre-step hook veto) and `max-tokens` (a step hit its output ceiling) are
+// deliberate endings, and a session with no `turn/end` at all never finished.
+const CLEAN_TURN_ENDS = new Set(["completed", "aborted", "blocked", "max-tokens"]);
 export function deriveStatus({ now, agg, live }) {
   const lastAt = agg.lastAt || 0;
   const awake = lastAt > 0 && now - lastAt <= ACTIVE_MS;
-  if (agg.lastError && (!agg.lastOkAt || agg.lastError.at > agg.lastOkAt)) return "failed";
-  const kind = agg.lastTurnEnd?.kind;
-  const finished = kind === "completed" || kind === "aborted";
-  if (live === false) {
-    if (finished) return "done";
-    return lastAt > 0 ? "exited" : "idle";
-  }
-  if (awake) return "running";
-  if (live === true) return "sleep";
-  if (finished) return "done";
-  return agg.lastTurnEnd ? "exited" : "idle";
+  if (visibleError(agg)) return "failed";
+  const finished = CLEAN_TURN_ENDS.has(agg.lastTurnEnd?.kind);
+  if (!(live ?? awake)) return finished ? "done" : lastAt > 0 ? "exited" : "idle";
+  return awake ? "running" : "sleep";
 }
 
-function toSession({ id, agg, now, live }) {
+// One row constructor for every DSH session: a full aggregate for logs inside
+// the window, a header-only aggregate for a parent that anchors a kept subtree.
+// A windowed-out parent is rendered from its header alone (its events were
+// deliberately not read), so its row reports `idle` rather than guessing an
+// ending it never saw — the anchor exists to hang the subtree, not to claim a
+// status.
+function toSession({ id, agg, now, live, windowed = false }) {
   const h = agg.header ?? {};
   const cwd = h.cwd ?? null;
   const isSubagent = h.origin === "subagent";
   const calls = [...agg.calls.values()];
   const lastCall = calls.at(-1) ?? null;
-  const lastAt = agg.lastAt || numOr(agg.firstAt, 0);
   return {
     id,
     title: agg.title ?? null,
@@ -130,17 +125,20 @@ function toSession({ id, agg, now, live }) {
     description: agg.subagent?.label ?? null,
     model: agg.model?.model ?? null,
     thinking: agg.thinking ?? null,
-    status: deriveStatus({ now, agg, live }),
+    status: windowed ? "idle" : deriveStatus({ now, agg, live }),
     requests: agg.requests,
     inputTokens: agg.inputTokens,
     outputTokens: agg.outputTokens,
     cacheRead: agg.cacheRead,
     cacheCreate: agg.cacheCreate,
     maxContext: agg.maxContext,
+    // the model's real window when the log recorded it — the card's context
+    // gauge and the sparkline cliff are measured against this, not a constant
+    contextWindow: agg.contextWindow ?? null,
     firstAt: agg.firstAt ?? h.createdAt ?? null,
-    lastAt,
-    sparkline: agg.sparkline.slice(-SPARK_TAIL),
-    lastError: agg.lastError,
+    lastAt: agg.lastAt || (agg.firstAt ?? 0),
+    sparkline: agg.sparkline,
+    lastError: visibleError(agg),
     todos: agg.todos,
     lastTool: lastCall
       ? {
@@ -151,42 +149,6 @@ function toSession({ id, agg, now, live }) {
           at: lastCall.at,
         }
       : null,
-    children: [],
-    live,
-  };
-}
-
-const numOr = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
-
-// A session whose own log is outside the window but that anchors a kept
-// subtree: identity from the header, no counters to show.
-function stubSession({ id, header, live }) {
-  const cwd = header?.cwd ?? null;
-  const isSubagent = header?.origin === "subagent";
-  const createdAt = numOr(header?.createdAt, 0);
-  return {
-    id,
-    title: null,
-    parentId: isSubagent ? header?.parentSession ?? null : null,
-    project: projectFromDir(cwd),
-    directory: cwd,
-    role: isSubagent ? "subagent" : null,
-    description: null,
-    model: null,
-    thinking: null,
-    status: "idle",
-    requests: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheRead: 0,
-    cacheCreate: 0,
-    maxContext: 0,
-    firstAt: createdAt || null,
-    lastAt: createdAt,
-    sparkline: [],
-    lastError: null,
-    todos: [],
-    lastTool: null,
     children: [],
     live,
   };
@@ -210,7 +172,7 @@ export async function snapshot({ now = Date.now() } = {}) {
   // window cannot be on the board, and its (possibly huge) log is not read at
   // all. Only sessions that pass the gate pay for a decode.
   const candidates = [];
-  for (const { id, dir } of listSessionDirs()) {
+  for (const { id, dir } of listSessionDirs(cfg.dir)) {
     if (archived.has(id)) continue;
     const logPath = findLogFile(dir);
     if (!logPath) continue;
@@ -226,10 +188,29 @@ export async function snapshot({ now = Date.now() } = {}) {
 
   const all = [];
   const aggs = new Map();
+  const warnings = [];
   for (const c of candidates) {
     if (c.mtimeMs < cutoff) continue;
-    const agg = readAggregate(c.logPath);
+    let agg;
+    try {
+      agg = readAggregate(c.logPath);
+    } catch {
+      // one unreadable log (permissions, a file replaced mid-read) must not
+      // take the rest of the harness off the board; the next poll retries it
+      continue;
+    }
     if (!agg?.header) continue; // empty or unreadable log — nothing to show
+    // A generation this fold cannot vouch for is skipped, not guessed at: the
+    // alternative is rendering a future vocabulary's rows under today's names.
+    const version = Number(agg.header.version);
+    if (Number.isFinite(version) && !SUPPORTED_FORMAT_VERSIONS.has(version)) {
+      warnings.push(`${c.id}: unreadable log format v${version} (this build folds v0–v3) — session skipped`);
+      continue;
+    }
+    const corrupt = corruptBytesOf(c.logPath);
+    if (corrupt > 0) {
+      warnings.push(`${c.id}: ${corrupt} byte(s) of a damaged frame dropped; the events after it were recovered`);
+    }
     all.push(toSession({ id: c.id, agg, now, live: liveOf(c.dir) }));
     aggs.set(c.id, agg);
   }
@@ -244,8 +225,8 @@ export async function snapshot({ now = Date.now() } = {}) {
       const c = byCandidate.get(parentId);
       if (!c) break;
       present.add(parentId);
-      const header = readHeader(c.logPath);
-      all.push(stubSession({ id: parentId, header, live: liveOf(c.dir) }));
+      const header = sessionHeader(c.logPath);
+      all.push(toSession({ id: parentId, agg: newAgg(header), now, live: liveOf(c.dir), windowed: true }));
       parentId = header?.parentSession ?? null;
     }
   }
@@ -284,5 +265,6 @@ export async function snapshot({ now = Date.now() } = {}) {
     sessions,
     roots: sessions.filter((s) => !s.parentId || !byId.has(s.parentId)).map((s) => s.id),
     ticker,
+    warnings,
   };
 }

@@ -1,17 +1,17 @@
 // AgenQ DeepSeek Harness lazy per-session reads: the detail panel and the
-// live-conversation feed. Both are answered from the aggregates the snapshot
-// poll already folded (see log.mjs) — the conversation additionally subscribes
-// the session so its normalized records are kept in memory.
+// live-conversation feed. Both are answered from the aggregate the snapshot
+// poll already folded (see fold.mjs/log.mjs); the conversation additionally
+// subscribes the session so its normalized records are kept in memory.
 import { cfg } from "./config.mjs";
-import { findLogPath, readSession, recordsOf, subscribe } from "./log.mjs";
-import { head, modelWindow } from "../lib.mjs";
+import { findLogPath, readAggregate, recordsOf, resubscribe, subscribe } from "./log.mjs";
+import { CONV_TAIL, head, modelWindow, parseCursor } from "../lib.mjs";
 
 // ---------- per-session detail (lazy — only read when the UI expands a row) ----------
 
 export function sessionDetail(id) {
   const path = findLogPath(cfg.dir, id);
   if (!path) return null;
-  const agg = readSession(path);
+  const agg = readAggregate(path); // the detail panel needs the aggregate, not the record buffer
   if (!agg?.header) return null;
   const calls = [...agg.calls.values()];
   const last = calls.at(-1) ?? null;
@@ -51,16 +51,20 @@ export function sessionDetail(id) {
 // tail of the record buffer (oldest first), a resume returns what was appended
 // past the cursor, so a poll moves bytes proportional to what was said.
 const CURSOR_PREFIX = "d";
-const CONV_TAIL = 400;
 
-function parseCursor(after) {
-  if (after == null) return null;
-  const n = Number(String(after).split(":")[1]);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
-function toItems(page, agg, firstLoad) {
+// One chip per tool call, exactly:
+//  - a call whose result is in this page is emitted from the result (the final
+//    status is the only status the append-only log actually recorded);
+//  - a call with no result anywhere in the page can only be an interrupted or
+//    still-running call, so on a full load it is emitted as running;
+//  - on a live poll (resume) calls are skipped, so a call that is still
+//    running when the poll happens is not followed by a duplicate chip once
+//    its result lands — the result record carries it then.
+// Records are self-contained, so none of this consults the aggregate.
+function toItems(page, firstLoad) {
   const items = [];
+  const answered = new Set();
+  for (const r of page) if (r.kind === "result") answered.add(r.callId);
   for (const r of page) {
     if (r.kind === "user") {
       if (r.text?.trim()) items.push({ kind: "text", role: "user", text: r.text, at: r.at });
@@ -76,13 +80,8 @@ function toItems(page, agg, firstLoad) {
       }
       continue;
     }
-    const info = agg.calls.get(r.callId);
     if (r.kind === "call") {
-      // The chip is emitted from the call only when no result exists anywhere
-      // in the log (an interrupted call) and only on a full load. On a live
-      // poll the result is what carries the status, so a call that is still
-      // running shows up when it finishes — one chip per call, never two.
-      if (!firstLoad || info?.status) continue;
+      if (!firstLoad || answered.has(r.callId)) continue;
       items.push({ kind: "tool", role: "assistant", tool: r.name, status: "running", input: r.input, at: r.at });
       continue;
     }
@@ -90,9 +89,9 @@ function toItems(page, agg, firstLoad) {
       items.push({
         kind: "tool",
         role: "assistant",
-        tool: info?.name ?? r.name ?? "?",
+        tool: r.name ?? "?",
         status: r.isError ? "error" : "completed",
-        input: info?.input ?? null,
+        input: r.input ?? null,
         at: r.at,
       });
     }
@@ -103,39 +102,36 @@ function toItems(page, agg, firstLoad) {
 export function sessionMessages(id, after) {
   const path = findLogPath(cfg.dir, id);
   if (!path) return null;
-  subscribe(path); // keeps normalized records for this session in memory
-  let agg = readSession(path, { collect: true });
+  let agg = subscribe(path); // keeps normalized records for this session in memory
   if (!agg) return null;
-  const base = {
-    sessionId: id,
-    title: agg.title ?? null,
-    directory: agg.header?.cwd ?? null,
-  };
-  const cursorSeq = parseCursor(after);
-  if (after != null && cursorSeq == null) {
-    return { ...base, cursor: after, items: [] }; // garbage cursor: no replay
-  }
+
+  // an unusable cursor (a foreign format, a hand-made request) becomes a first
+  // load rather than being echoed back forever, so the client recovers
+  const cursorSeq = parseCursor(after, CURSOR_PREFIX);
+  const firstLoad = cursorSeq == null;
 
   let records = recordsOf(path) ?? [];
-  const firstLoad = cursorSeq == null;
-  let page;
-  if (firstLoad) {
-    page = records.slice(-CONV_TAIL);
-  } else {
+  if (!firstLoad && records.length && cursorSeq < records[0].seq) {
     // A cursor older than the record buffer (a tab suspended for a long time)
     // is answered by rebuilding the buffer from the log: the client may miss
     // records between its cursor and the rebuilt window, but it never gets a
-    // record twice.
-    if (records.length && cursorSeq < records[0].seq) {
-      // the rebuild starts a fresh aggregate; take it, or the chip names and
-      // arguments resolved through the old one would be lost
-      agg = readSession(path, { collect: true, reset: true }) ?? agg;
-      records = recordsOf(path) ?? [];
-    }
-    page = records.filter((r) => r.seq > cursorSeq);
+    // record twice. Rebuilding also re-folds the aggregate, hence the re-read.
+    agg = resubscribe(path) ?? agg;
+    records = recordsOf(path) ?? [];
   }
+  const page = firstLoad ? records.slice(-CONV_TAIL) : records.filter((r) => r.seq > cursorSeq);
 
-  const items = toItems(page, agg, firstLoad);
-  const cursor = page.length ? `${CURSOR_PREFIX}:${page[page.length - 1].seq}` : after ?? `${CURSOR_PREFIX}:0`;
-  return { ...base, cursor, items };
+  const items = toItems(page, firstLoad);
+  const cursor = page.length
+    ? `${CURSOR_PREFIX}:${page[page.length - 1].seq}`
+    : firstLoad
+      ? `${CURSOR_PREFIX}:0`
+      : after;
+  return {
+    sessionId: id,
+    title: agg.title ?? null,
+    directory: agg.header?.cwd ?? null,
+    cursor,
+    items,
+  };
 }
