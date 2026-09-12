@@ -2,7 +2,7 @@
 
 AgenQ is harness-agnostic: any tool that runs AI coding sessions and leaves
 telemetry on disk can appear on the board. A **harness adapter** teaches the
-monitor how one such tool — ZCode and Hermes today — exposes:
+monitor how one such tool — ZCode, Hermes and DeepSeek Harness today — exposes:
 
 1. a **state snapshot**: every session, its tokens, status, todos, errors and
    its place in the manager→subagent tree (poll, ~1.5s cadence),
@@ -98,7 +98,11 @@ registry only namespaces them.
 The frontend needs no other changes: sessions from all harnesses merge into
 one time-ordered tree, ticker, Active Now strip and failures panel, and every
 row carries the harness origin mark. `harness/hermes/` is a working second
-reference — a single-session SQLite (`~/.hermes/state.db`), no stop action.
+reference — a single-session SQLite (`~/.hermes/state.db`), no stop action —
+and `harness/deepseek/` a third, for a harness whose telemetry is neither
+SQLite nor small: an append-only Zstandard-framed event log per session, read
+incrementally frame by frame (`harness/deepseek/log.mjs`), with per-session
+liveness taken from the kernel's `flock` table rather than a process scan.
 
 How much board data each harness can supply — and what is inherently vs only
 currently missing — is tracked in [docs/harness-data-parity.md](../docs/harness-data-parity.md).

@@ -12,15 +12,15 @@ const ROLE_EMOJI = {
   "assistant-manager": "🔎",
 };
 // Harness origin marks: the letter is derived from the harness id
-// (zcode → Z, hermes → H), so any future adapter gets a mark with no map
-// and no client edit. One identical mark on every surface — no label
-// variant; the full harness name lives in the tooltip and the legend.
+// (zcode → Z, hermes → H, deepseek → D), so any future adapter gets a mark
+// with no map and no client edit. One identical mark on every surface — no
+// label variant; the full harness name lives in the tooltip and the legend.
 // Each mark also carries a per-harness accent color (letter, border, faint
 // tint) so harnesses are distinguishable at a glance: known ids get a
 // hand-picked hue, anything else a stable one hashed from the id.
 // Accepts a session object (uses its `harness` field), a bare harness id
 // (ticker entries), or null.
-const HARNESS_HUE = { "zcode": 212, "hermes": 26 };
+const HARNESS_HUE = { "zcode": 212, "hermes": 26, "deepseek": 265 };
 function harnessHue(id) {
   if (HARNESS_HUE[id] != null) return HARNESS_HUE[id];
   let x = 0;

@@ -11,8 +11,9 @@
 // to its own telemetry.
 import zcode from "./zcode/index.mjs";
 import hermes from "./hermes/index.mjs";
+import deepseek from "./deepseek/index.mjs";
 
-const ADAPTERS = [zcode, hermes];
+const ADAPTERS = [zcode, hermes, deepseek];
 
 const byId = new Map(ADAPTERS.map((a) => [a.id, a]));
 
