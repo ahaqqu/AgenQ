@@ -19,8 +19,8 @@ export function rows(db, sql, params = []) {
   return db.prepare(sql).all(...params);
 }
 
-// hermes/zcode timestamp columns agree on REAL seconds; the board and UI
-// speak epoch milliseconds
+// hermes timestamp columns are REAL seconds (s2ms converts); zcode and
+// DeepSeek Harness store epoch ms raw — only ever s2ms a hermes column
 export const s2ms = (t) => (t == null ? null : Math.round(Number(t) * 1000));
 
 export const tail = (s, n) => { s = String(s ?? ""); return s.length > n ? "…" + s.slice(-n) : s; };
@@ -35,17 +35,18 @@ export const CONV_THINK_CAP = 6_000;
 export const CONV_INPUT_CAP = 2_000;
 export const CONV_TAIL = 400;
 
-// Parse a conversation cursor — the numeric offset out of "<prefix>:<n>".
-// `prefix` pins the feed that produced it (every non-zcode feed tags its
-// cursors with one); omit it to accept an untagged numeric cursor too.
-// Returns null for an absent or unusable cursor, which every adapter reads
-// as "first load": a tab holding a foreign or hand-made cursor recovers on
-// its next poll instead of replaying nothing forever.
+// Parse a conversation cursor — the numeric parts after the "<prefix>:" tag
+// (hermes "m:<n>", deepseek "d:<n>", zcode the pair "z:<mseq>:<pseq>").
+// `prefix` pins the feed that produced it (every feed tags its cursors with
+// one); pass null to accept an untagged cursor too. Returns the numeric
+// parts, or null for an absent or unusable cursor, which every adapter
+// reads as "first load": a tab holding a foreign or hand-made cursor
+// recovers on its next poll instead of replaying nothing forever.
 export function parseCursor(after, prefix) {
   if (after == null) return null;
-  const re = prefix ? new RegExp(`^${prefix}:(\\d+)$`) : /^(?:[A-Za-z]+:)?(\d+)$/;
-  const m = re.exec(String(after));
-  return m ? Number(m[1]) : null;
+  const head = prefix != null ? `${prefix}:` : "(?:[A-Za-z]+:)?";
+  const m = new RegExp(`^${head}(\\d+(?::\\d+)*)$`).exec(String(after));
+  return m ? m[1].split(":").map(Number) : null;
 }
 
 // project = last path segment of the session's working directory

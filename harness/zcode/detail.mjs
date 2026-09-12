@@ -1,39 +1,15 @@
 // Lazy per-session reads: the detail panel (tool arguments, thinking, token
 // breakdowns) and the live-conversation feed. Both open their own read-only
 // DB connection and are only hit when the UI asks for a specific session.
-import { Database } from "bun:sqlite";
 import { cfg } from "./config.mjs";
-import { CONV_INPUT_CAP, CONV_TAIL, CONV_TEXT_CAP, CONV_THINK_CAP } from "../lib.mjs";
+import { CONV_INPUT_CAP, CONV_TAIL, CONV_TEXT_CAP, CONV_THINK_CAP, head, modelWindow, parseCursor, roDb, rows, tail } from "../lib.mjs";
 
-function roDb() {
-  try {
-    return new Database(cfg.db, { readonly: true });
-  } catch {
-    return null;
-  }
-}
-
-function rows(db, sql, params = []) {
-  if (!db) return [];
-  return db.prepare(sql).all(...params);
-}
+const CURSOR_PREFIX = "z";
 
 // ---------- per-session detail (lazy — only read when the UI expands a row) ----------
 
-// Context-window estimates for the fill gauge; unmatched models fall back to
-// the same 200k cliff the sparkline uses.
-const MODEL_WINDOWS = [
-  [/glm/i, 200_000],
-  [/kimi/i, 256_000],
-  [/deepseek/i, 128_000],
-];
-const modelWindow = (model) => MODEL_WINDOWS.find(([re]) => re.test(model ?? ""))?.[1] ?? 200_000;
-
-const tail = (s, n) => { s = String(s ?? ""); return s.length > n ? "…" + s.slice(-n) : s; };
-const head = (s, n) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n) + " …" : s; };
-
 export function sessionDetail(id) {
-  const db = roDb();
+  const db = roDb(cfg.db);
   try {
     const q = (sql, params = []) => {
       try { return rows(db, sql, params); } catch { return []; }
@@ -122,10 +98,11 @@ export function sessionDetail(id) {
 
 // The conversation lives in `message` (role, sequence) × `part` (text /
 // reasoning / tool rows). The client polls with the cursor returned here —
-// the (message-sequence, part-sequence) pair of the last row it saw — and
-// only rows past that pair come back, so a poll moves bytes proportional
-// to what was actually said, not to the size of the session. The text caps
-// and the tail length are shared with the other adapters (../lib.mjs).
+// the tagged (message-sequence, part-sequence) pair of the last row it saw,
+// "z:<mseq>:<pseq>" — and only rows past that pair come back, so a poll
+// moves bytes proportional to what was actually said, not to the size of
+// the session. The text caps and the tail length are shared with the other
+// adapters (../lib.mjs).
 
 const convSel = `
   SELECT json_extract(m.data, '$.role') AS role,
@@ -164,14 +141,16 @@ function convItem(r) {
 }
 
 export function sessionMessages(id, after) {
-  const db = roDb();
+  const db = roDb(cfg.db);
   try {
     const sess = rows(db, `SELECT title, directory FROM session WHERE id = ?`, [id])[0] ?? null;
-    let cursor = after ?? "0:0";
+    let cursor = after ?? `${CURSOR_PREFIX}:0:0`;
     let parts;
-    if (after) {
-      const [a, b] = String(after).split(":").map(Number);
-      const from = [Number.isFinite(a) ? a : 0, Number.isFinite(b) ? b : 0];
+    // An unusable cursor (a foreign format, a hand-made request) becomes a
+    // first load — the client adopts the fresh cursor we return and recovers
+    // on this poll, instead of resuming from a nonsense offset.
+    const from = parseCursor(after, CURSOR_PREFIX);
+    if (from) {
       parts = rows(db, `${convSel}
         WHERE p.session_id = ?
           AND (coalesce(m.sequence,0), coalesce(p.sequence,0)) > (?, ?)
@@ -186,7 +165,7 @@ export function sessionMessages(id, after) {
     }
     const items = [];
     for (const r of parts) {
-      cursor = `${r.mseq}:${r.pseq}`;
+      cursor = `${CURSOR_PREFIX}:${r.mseq}:${r.pseq}`;
       const item = convItem(r);
       if (item) items.push(item);
     }

@@ -147,7 +147,7 @@ export function sessionMessages(id, after) {
     };
     // An unusable cursor becomes a first load (never an echoed-back dead end):
     // the client adopts the fresh cursor we return and recovers on this poll.
-    const resume = parseCursor(after, CURSOR_PREFIX);
+    const [resume] = parseCursor(after, CURSOR_PREFIX) ?? [];
 
     // First load (no cursor): tail the last N rows, oldest first, per the
     // contract. Resume: rows past the cursor in conversation order.

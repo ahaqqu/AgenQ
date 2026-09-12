@@ -30,7 +30,7 @@ The installer installs [Bun](https://bun.sh) if it's missing, clones AgenQ to `~
 
 To install from a checkout instead: `git clone https://github.com/ahaqqu/AgenQ && cd AgenQ && ./install.sh`.
 
-Everything else — server flags, manual setups, and the one write AgenQ can perform — is in [docs/running.md](docs/running.md).
+Everything else — server flags, manual setups, and the one write AgenQ can perform — is in [docs/running.md](docs/running.md). The API the board polls (`/api/state`, the lazy detail and conversation feeds, the stop action) is documented in [docs/api.md](docs/api.md).
 
 ## Where the data comes from
 
