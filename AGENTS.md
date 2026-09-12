@@ -2,6 +2,12 @@
 
 ## Pull requests
 
+Both gates below apply to PRs that change the running app — a diff touching any
+of `monitor.mjs`, `harness/**`, `public/**`, `scripts/**`, `install.sh` or
+`package.json`. A PR that touches none of them (docs, skills, agent-instruction
+files) has no rendered behavior to verify and no README surface to update: say
+that in the PR description instead of running the app.
+
 Before opening a PR, check that `README.md` is up to date with the change:
 
 - UI changes: retake the affected screenshots in `docs/` and update them (and their alt text) in the README. Screenshots are **whole-page** captures at the board's normal viewport width — the entire page, not just the first viewport-full. Don't reuse stale captures. Two board quirks bite stitched captures, so handle them: click the live pill (top right) to freeze the 1.5s re-render before capturing, or scroll-bands tear, and pin the sticky top bar to normal flow first (`position: static`), or it repeats at every band boundary.
