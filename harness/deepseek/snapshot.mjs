@@ -88,21 +88,28 @@ function archivedIds() {
 
 // Status vocabulary (see ../README.md):
 //   failed  — the newest error is newer than the newest proof of success
-//   running — a heartbeat inside ACTIVE_MS
-//   sleep   — quiet, but the session is still held open by a live process
-//   done    — quiet, detached, and its last turn ended cleanly
-//   exited  — quiet, detached, last turn never finished (crash / kill)
+//   running — a heartbeat inside ACTIVE_MS while the session is still attached
+//   sleep   — attached but quiet
+//   done    — detached and its last turn ended cleanly
+//   exited  — detached without a clean ending (crash / kill / interrupted)
 //   idle    — no events at all (a seeded or never-used session)
+// Liveness is exact here (the harness's own write lease), so it outranks
+// recency: a session nothing holds open is never reported as running, however
+// recently it wrote its last event.
 export function deriveStatus({ now, agg, live }) {
   const lastAt = agg.lastAt || 0;
   const awake = lastAt > 0 && now - lastAt <= ACTIVE_MS;
   if (agg.lastError && (!agg.lastOkAt || agg.lastError.at > agg.lastOkAt)) return "failed";
-  if (awake) return "running";
   const kind = agg.lastTurnEnd?.kind;
+  const finished = kind === "completed" || kind === "aborted";
+  if (live === false) {
+    if (finished) return "done";
+    return lastAt > 0 ? "exited" : "idle";
+  }
+  if (awake) return "running";
   if (live === true) return "sleep";
-  if (kind === "completed" || kind === "aborted") return "done";
-  if (agg.lastTurnEnd) return "exited";
-  return live === false && lastAt > 0 ? "exited" : "idle";
+  if (finished) return "done";
+  return agg.lastTurnEnd ? "exited" : "idle";
 }
 
 function toSession({ id, agg, now, live }) {

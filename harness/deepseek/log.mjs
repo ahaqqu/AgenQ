@@ -73,6 +73,11 @@ export function findLogFile(dir) {
 
 /** Raw session id -> its log path, by scanning the sessions root once. */
 export function findLogPath(dshDir, id) {
+  // The id arrives URL-encoded from /api/session/:id/…, so it is untrusted
+  // input that ends up in a path. DSH ids are `session-<uuid>` or `<uuid>`;
+  // anything outside that alphabet (separators, "..", dots-first) is refused
+  // rather than joined — the endpoint must never become a file probe.
+  if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) return null;
   const root = join(dshDir, "sessions");
   let projects;
   try {
