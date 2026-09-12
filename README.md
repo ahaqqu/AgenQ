@@ -1,6 +1,6 @@
 # AgenQ
 
-Live mission-control monitor for AI coding-agent harnesses — ZCode, [Hermes](https://github.com/NousResearch/hermes-agent) and [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) today, any telemetry-leaving tool next — because watching a manager run should be less boring than waiting for it. 🚀
+Live mission-control monitor for AI coding-agent harnesses — ZCode, [Hermes](https://github.com/NousResearch/hermes-agent) and [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) today, any telemetry-leaving tool next — so every subagent a run dispatches is easy to monitor at a glance. 🚀
 
 AgenQ reads (read-only) the telemetry harnesses already write on disk and turns it into a live board:
 
@@ -8,7 +8,7 @@ AgenQ reads (read-only) the telemetry harnesses already write on disk and turns 
 
 - **One merged board** — sessions from every mounted harness mix in the same tree, ticker, Active Now strip and failure panel, ordered by project and then recency; only the small boxed-letter mark (a blue Z for zcode, an orange H for hermes, a violet D for deepseek — each harness has its own accent color, hover for the name) says which harness runs an agent — nothing else is separated
 - **Agent tree** — the manager session with every dispatched subagent under it (role, model, live status)
-- **Token-burn sparklines** — input tokens per request per agent — main sessions and subagents alike — with a dashed marker at the context cliff: the model's real window when the harness records it (DeepSeek Harness does), the 200K cliff from the run that motivated this tool otherwise (see ahaqqu/agentic-project-template#94)
+- **Token-burn sparklines** — input tokens per request per agent — main sessions and subagents alike — with a dashed marker at the context cliff: the model's real window when the harness records it (DeepSeek Harness does), a 200K fallback otherwise
 - **Live todos** — each agent's todo list, animated as it progresses; every card shares the same anatomy (live duration, stats, sparkline, todos) — the ⏱ duration is the session's live time, from its start to its last activity (a still-running card shows the span it has been alive so far) — and the main session card ("main", like a role) sits leftmost in the row, hung off a header that carries the session title plus run totals (sum of in/out/reqs, cache hit, spawned subagent count, how many are running, live time across the whole run, last activity across the whole tree)
 - **Active Now strip** — every session with a heartbeat in the last 5m; click a row to expand it into a live detail panel: the current tool call with its actual arguments, the latest thinking excerpt, todo progress, diff summary, context-window fill, turn timings (duration, time-to-first-token, retries), a full token breakdown (cache read/write, reasoning) and recent errors
 - **Live conversation** — the 💬 button opens the session's full conversation in a new tab (user prompts, assistant replies, collapsed thinking, tool calls with status), streaming new messages as they happen; the header carries the harness mark too. The button lives on Active Now rows, main-session cards and every subagent card
@@ -44,4 +44,4 @@ Adapters can surface only what a harness records, so [docs/harness-data-parity.m
 
 ## Status
 
-v1 — end-to-end working monitor (server + UI). Roadmap and design notes live in the [issues](https://github.com/ahaqqu/AgenQ/issues).
+v0.1.0 — end-to-end working monitor (server + UI). Roadmap and design notes live in the [issues](https://github.com/ahaqqu/AgenQ/issues).
