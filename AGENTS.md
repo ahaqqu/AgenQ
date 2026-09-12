@@ -11,7 +11,7 @@ that in the PR description instead of running the app.
 Before opening a PR, check that `README.md` is up to date with the change:
 
 - UI changes: retake the affected screenshots in `docs/` and update them (and their alt text) in the README. Screenshots are **whole-page** captures at the board's normal viewport width — the entire page, not just the first viewport-full. Don't reuse stale captures. Two board quirks bite stitched captures, so handle them: click the live pill (top right) to freeze the 1.5s re-render before capturing, or scroll-bands tear, and pin the sticky top bar to normal flow first (`position: static`), or it repeats at every band boundary.
-- Behavior/feature changes: update the README section that describes the feature (and the "Where the data comes from" table if sources change).
+- Behavior/feature changes: update the README section that describes the feature (and the source list in `docs/data-sources.md` if the data AgenQ reads changes).
 - If nothing in the README is affected, say so in the PR description instead of silently skipping the check.
 
 Before opening a PR, run a smoke test of the running app and record the result in the PR description:
