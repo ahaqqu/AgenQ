@@ -14,7 +14,7 @@
   "engines": {
     "bun": ">=1.1"
   },
-  "dependencies": {
+  "devDependencies": {
     "valibot": "^1.4.2"
   }
 }

@@ -36,7 +36,7 @@ function harnessMark(s) {
   if (!h) return "";
   return `<span class="hmark" style="${harnessStyle(h)}" title="harness: ${esc(h)}">${esc(h.charAt(0).toUpperCase())}</span>`;
 }
-const CTX_LIMIT = 200_000; // the cliff from the #94 analysis
+const CTX_LIMIT = 200_000; // fallback context cliff when a harness records no window
 
 const $ = (id) => document.getElementById(id);
 
