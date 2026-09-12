@@ -58,11 +58,30 @@ export default {
     children: [childIds],                 // manager→subagent tree edges
   }],
   roots: [sessionId],                     // ids of tree roots, any order
+  ticker: [{ sessionId, tool, status, at, outputBytes, exitCode }], // optional
+  warnings: ["<what degraded>"],           // optional
 }
 ```
 
-`generatedAt`, `totals`, and live-process counts are derived by the core, not
-the adapter — an adapter does not invent its own totals. The `ticker` inside a
+Additive per-row fields are allowed and the UI ignores ones it does not know.
+The DeepSeek adapter currently fills `live` (boolean: the harness's own write
+lease says a process holds the session — the UI dims a failed row whose run
+exited), `description` (the subagent's own descriptor label, shown as the
+card's task line), `contextWindow` (the model's real window, so that card's
+context gauge and sparkline cliff are measured against it) and `exitCode`
+inside `lastTool`.
+
+`warnings` is how an adapter degrades *part* of its data without taking its
+whole harness off the board: the registry prefixes each entry with the harness
+id and merges it into `/api/state`'s `warnings` array next to the per-harness
+failures it records when `snapshot()` throws. Use it for data that is
+damaged, refused, or skipped — not for a missing installation, which is the
+empty shape.
+
+`generatedAt`, `totals`, `roots`, and live-process counts are derived by the
+core, not the adapter — an adapter does not invent its own totals (returning
+`roots` is still contract-shaped, and the other adapters do; the registry
+recomputes it from the merged board). The `ticker` inside a
 snapshot is optional but legitimate: the core prefers a harness-provided
 ticker (its per-harness tool history is richer than anything the core could
 reconstruct from `lastTool`) and falls back to per-session `lastTool` entries.
@@ -100,9 +119,11 @@ one time-ordered tree, ticker, Active Now strip and failures panel, and every
 row carries the harness origin mark. `harness/hermes/` is a working second
 reference — a single-session SQLite (`~/.hermes/state.db`), no stop action —
 and `harness/deepseek/` a third, for a harness whose telemetry is neither
-SQLite nor small: an append-only Zstandard-framed event log per session, read
-incrementally frame by frame (`harness/deepseek/log.mjs`), with per-session
-liveness taken from the kernel's `flock` table rather than a process scan.
+SQLite nor small: an append-only Zstandard-framed event log per session. It
+splits into `frames.mjs` (the codec), `fold.mjs` (the event vocabulary → board
+aggregate, pure) and `log.mjs` (discovery + the incremental cache that reads
+each log once), with per-session liveness taken from the kernel's `flock`
+table rather than a process scan.
 
 How much board data each harness can supply — and what is inherently vs only
 currently missing — is tracked in [docs/harness-data-parity.md](../docs/harness-data-parity.md).

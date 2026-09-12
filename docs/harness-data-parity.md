@@ -36,15 +36,16 @@ Harness `~/.dsh/sessions/**/session[.vN].jsonl.zstd` + `/proc/locks`).
 | Token totals (in/out/cache) | summed per request row | cumulative on `sessions` + per-task rows | per-message `usage` summed | **parity of value, not of naming**: DSH's `inputTokens` excludes cache reads, so the adapter adds `cacheReadTokens` back to keep the board's "input includes the cached part" semantics (cache hit % stays comparable) |
 | Sparkline (tokens/request) | exact per-request `model_usage.input_tokens` | per-task averages (plateau points from `session_model_usage`) | exact per-request `assistant/message.usage` (prompt tokens incl. cache read) | **parity with zcode**; **inherent** for hermes, which stores per-task cumulative sums |
 | Context used (maxContext) | exact: `MAX(model_usage.input_tokens)` per request | per-call **average** `input/api_call_count` per task | exact: biggest single-request prompt | **parity with zcode**; hermes's average under-measures a spiky request |
+| Context window (the cliff a card measures against) | not recorded — the UI's 200k constant | derivable from `sessions.model` through the static table | exact: `request/context.contextWindow` (e.g. 1M) | **DSH is the first harness to fill the optional `contextWindow` row field**, so its card gauge and sparkline cliff use the model's real window; harnesses that don't report one keep the 200k constant |
 | Status running/sleep | `model_usage` recency + live `/proc` scan | `session_model_usage.last_seen` / `last_activity_at` recency | event recency, refined by the session's own write lease | **parity** (recency); differs in liveness, next row |
 | Liveness / exited | per-directory `/proc` scan of `zcode-cli` processes | not claimed — sessions live in shared gateway/daemon processes | `/proc/locks` matched against each session's `session.lock` inode: DSH holds a kernel `flock` for the life of its write handle and the kernel drops it on process death | **parity with zcode, exact per session**: the harness's own lease is read, not inferred. Still no stop surface (next row) |
 | Live duration (⏱ on cards, `live …` in run headers) | `MIN(started_at)` → `MAX(completed_at)` across request rows (+ agents-dir timestamps) | `sessions.started_at` → `last_activity_at` | header `createdAt` → last event time | **parity** — all three fill `firstAt`/`lastAt`; the span is computed client-side |
 | Stop action | project-level SIGTERM via `/proc` | none — `hasStop: false` | none — `hasStop: false` (every session lives inside one shared `dsh` process) | **inherent** (deliberate: no safe surface) |
-| Done vs failed | per-request `status` / `error_type` in `model_usage` | `ended_at` + `handoff_error` / `compression_failure_error` | `turn/end` reason (`completed`/`aborted`/`error`/`interrupted`), plus `llm/retry` failures; an error older than the next successful call or clean turn is dropped as recovered | **inherent difference in granularity**, mapped to the same vocabulary |
+| Done vs failed | per-request `status` / `error_type` in `model_usage` | `ended_at` + `handoff_error` / `compression_failure_error` | `turn/end` reason — `completed`/`aborted`/`blocked`/`max-tokens` are clean endings, `error` and `interrupted` are not (and a turn with no end at all never finished) — plus `llm/retry` failures; an error older than the next successful call or clean turn is dropped as recovered | **inherent difference in granularity**, mapped to the same vocabulary |
 | Todos | `todo` table (per session, positioned) | `messages` rows `tool_name='todo'` (latest list per session) | `todo/write` events (latest list per session) | **parity** |
 | Errors shown on card | last `model_usage.error_type/message` | only handoff/compression failures | last failed `turn/end` or `llm/retry` failure (rate limits, auth, transport, bad requests) | **inherent** in source, **parity** in the slot: each harness surfaces its own failure vocabulary |
-| Tool ticker / last tool | `tool_usage` table: name, status, exit code, bytes, timing | parsed from transcript `messages` role='tool' rows via `toolResult()` | `tool/call` + `tool/result` events: status, output bytes, and the bash exit code when the result carries its trailing `[exit code: N]` marker (a clean exit carries none) | **parity**; zcode's table is the only one that reports a clean exit explicitly |
-| Conversation feed (💬) | message×part transcript (exact, ordered by sequence) | `messages` table ordered by row id, tool args recovered via `tool_call_id` pairing | normalized log records, cursor = the log's own event `seq` | **parity**, both cursor-resumable. DSH tool chips are emitted from the result (final status) rather than the call, because the append-only log has no row to update once a call starts |
+| Tool ticker / last tool | `tool_usage` table: name, status, exit code, bytes, timing | parsed from transcript `messages` role='tool' rows via `toolResult()` | `tool/call` + `tool/result` events: status, output bytes, and the outcome markers DSH appends to bash results (`[exit code: N]`, `[killed by signal: X]`, `[timed out after Nms]` — a clean exit carries none, and a kill or timeout is reported as an error outcome) | **parity**; zcode's table is the only one that reports a clean exit explicitly |
+| Conversation feed (💬) | message×part transcript (exact, ordered by sequence) | `messages` table ordered by row id, tool args recovered via `tool_call_id` pairing | normalized log records, cursor = the log's own event `seq` | **parity**, both cursor-resumable. DSH tool chips are emitted from the result (final status) rather than the call, because the append-only log has no row to update once a call starts; injected user-role notices (workspace instructions, skill catalogs, job notices) are **not** rendered as "you" — only what the human actually sent is |
 | Detail panel: current tool + args | from `part` tool rows (args inline) | newest tool result + args recovered via `tool_call_id` probe | newest `tool/call` with its arguments and result status | **parity** |
 | Detail panel: thinking | newest `reasoning` part row | `reasoning`/`reasoning_content` columns | `reasoning` content block of the newest assistant message | **parity** |
 | Detail panel: diff stats | `summary_additions/deletions/files` | not tracked | not tracked | **inherent** |
@@ -101,10 +102,20 @@ accidental.
   local user state and approvals; not mission-control data.
 - **deepseek `settings.yaml`, `.credentials.yaml`, `.env`, `profiles/`** —
   user configuration and secrets, never board data.
-- **deepseek `storages/session_projcache*.json`** — a projection cache the
+- **deepseek `storages/session_projcache.json` and
+  `storages/session_projcache/sessions/<id>.json`** — a projection cache the
   harness rebuilds from the same event logs AgenQ already reads; the logs are
-  the source of truth, and reading both would double-count. The only thing it
-  holds that the logs don't is aggregate timing (listed as recoverable above).
+  the source of truth (measured: the live session's checkpoint lags its log by
+  several events), and reading both would double-count. It keeps no
+  per-request history, so it cannot feed the sparkline at all. The only thing
+  it holds that the logs don't is aggregate timing (listed as recoverable
+  above).
+- **An unrecognized deepseek log generation** — the adapter folds v0–v3 and
+  skips a session whose header names a newer format, reporting it in
+  `warnings`, rather than reading a future vocabulary under today's names. A
+  damaged frame inside an otherwise readable log is dropped the same way: the
+  events after it are still folded, because one bad frame must not silence
+  the rest of a session.
 - **All three: anything that would require writing to the harness's telemetry** —
   AgenQ is read-only (`mode=ro`, fresh connection per poll, read-only file
   reads) by architecture.
