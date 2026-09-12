@@ -11,8 +11,9 @@
 // to its own telemetry.
 import zcode from "./zcode/index.mjs";
 import hermes from "./hermes/index.mjs";
+import deepseek from "./deepseek/index.mjs";
 
-const ADAPTERS = [zcode, hermes];
+const ADAPTERS = [zcode, hermes, deepseek];
 
 const byId = new Map(ADAPTERS.map((a) => [a.id, a]));
 
@@ -61,6 +62,10 @@ export async function snapshot(now = Date.now()) {
       sessions.push(...snap.sessions.map((s) => namespaceSession(adapter.id, s)));
       if (snap.ticker?.length) tickers.push(...snap.ticker.map((t) => ({ ...t, sessionId: nsId(adapter.id, t.sessionId), harness: adapter.id })));
       if (snap.liveProcs) Object.assign(liveProcs, snap.liveProcs);
+      // An adapter may degrade part of its own data and say so (a corrupt
+      // frame, a log generation it refuses to interpret) instead of throwing
+      // and taking its whole harness off the board.
+      if (snap.warnings?.length) warnings.push(...snap.warnings.map((w) => `${adapter.id}: ${w}`));
     } catch (e) {
       warnings.push(`${adapter.id}: ${e?.message ?? String(e)}`);
     }

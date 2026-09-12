@@ -1,7 +1,7 @@
 {
   "name": "agenq",
   "version": "0.1.0",
-  "description": "Live mission-control monitor for ZCode main sessions and subagents — token burn, agent tree, todos, tool ticker.",
+  "description": "Live mission-control monitor for AI coding-agent harnesses (ZCode, Hermes, DeepSeek Harness) — token burn, agent tree, todos, tool ticker.",
   "type": "module",
   "bin": {
     "agenq": "monitor.mjs"

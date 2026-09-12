@@ -12,15 +12,15 @@ const ROLE_EMOJI = {
   "assistant-manager": "🔎",
 };
 // Harness origin marks: the letter is derived from the harness id
-// (zcode → Z, hermes → H), so any future adapter gets a mark with no map
-// and no client edit. One identical mark on every surface — no label
-// variant; the full harness name lives in the tooltip and the legend.
+// (zcode → Z, hermes → H, deepseek → D), so any future adapter gets a mark
+// with no map and no client edit. One identical mark on every surface — no
+// label variant; the full harness name lives in the tooltip and the legend.
 // Each mark also carries a per-harness accent color (letter, border, faint
 // tint) so harnesses are distinguishable at a glance: known ids get a
 // hand-picked hue, anything else a stable one hashed from the id.
 // Accepts a session object (uses its `harness` field), a bare harness id
 // (ticker entries), or null.
-const HARNESS_HUE = { "zcode": 212, "hermes": 26 };
+const HARNESS_HUE = { "zcode": 212, "hermes": 26, "deepseek": 265 };
 function harnessHue(id) {
   if (HARNESS_HUE[id] != null) return HARNESS_HUE[id];
   let x = 0;
@@ -39,6 +39,11 @@ function harnessMark(s) {
 const CTX_LIMIT = 200_000; // the cliff from the #94 analysis
 
 const $ = (id) => document.getElementById(id);
+
+// A harness that records the model's real context window fills
+// `session.contextWindow`; every other harness keeps the 200k cliff the
+// sparkline and the card's ctx gauge were designed around.
+const ctxWindow = (s) => (s?.contextWindow > 0 ? s.contextWindow : CTX_LIMIT);
 
 function fmt(n) {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
@@ -81,7 +86,7 @@ function humanType(t) {
   return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
 }
 
-function drawSpark(canvas, series) {
+function drawSpark(canvas, series, cliff = CTX_LIMIT) {
   const w = canvas.clientWidth || 300, h = canvas.clientHeight || 44;
   canvas.width = w * devicePixelRatio; canvas.height = h * devicePixelRatio;
   const ctx = canvas.getContext("2d");
@@ -94,9 +99,9 @@ function drawSpark(canvas, series) {
   ctx.beginPath();
   ctx.roundRect(0, 0, w, h, 4);
   ctx.fill();
-  // y-scale always spans the context cliff so the 200k line (and what's
+  // y-scale always spans the session's own cliff, so the line (and what's
   // under vs. over it) is readable even on quiet sessions
-  const max = Math.max(...series, CTX_LIMIT);
+  const max = Math.max(...series, cliff);
   const step = w / (series.length - 1);
   const yOf = (v) => h - (v / max) * (h - 4) - 2;
   // area
@@ -114,12 +119,12 @@ function drawSpark(canvas, series) {
     const x = i * step, y = scaled[i];
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   });
-  ctx.strokeStyle = max > CTX_LIMIT ? "#e5534b" : "#6ea8fe";
+  ctx.strokeStyle = max > cliff ? "#e5534b" : "#6ea8fe";
   ctx.lineWidth = 1.5;
   ctx.stroke();
-  // cliff marker + label, always drawn now that the scale reaches 200k
+  // cliff marker + label, always drawn now that the scale reaches it
   {
-    const y = yOf(CTX_LIMIT);
+    const y = yOf(cliff);
     ctx.setLineDash([3, 3]);
     ctx.strokeStyle = "rgba(229,83,75,.5)";
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
@@ -127,7 +132,7 @@ function drawSpark(canvas, series) {
     ctx.fillStyle = "rgba(229,83,75,.8)";
     ctx.font = "9px ui-monospace, monospace";
     ctx.textAlign = "right";
-    ctx.fillText(fmt(CTX_LIMIT), w - 2, y - 2);
+    ctx.fillText(fmt(cliff), w - 2, y - 2);
   }
   ctx.textAlign = "left";
 }

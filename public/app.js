@@ -86,12 +86,14 @@ const reqCls = (n) => n > 200 ? "st-hot" : n >= 100 ? "st-warn" : "st-good";
 // one stats grammar everywhere: "ch 99.99% · in 12.46M · out 73.2k ·
 // 133 reqs · ctx 148.4k". ch = cache hit: zcode's input_tokens already
 // includes the cached part, so it's cache-read / input. ctx is measured
-// against the 200k cliff.
+// against the session's own context window when its harness reports one,
+// and against the 200k cliff otherwise.
 function statsHtml(s) {
   const ch = (s.inputTokens ?? 0) > 0 ? (s.cacheRead ?? 0) / s.inputTokens : null;
+  const win = ctxWindow(s);
   return (ch != null ? `ch <span class="st ${chCls(ch)}">${(ch * 100).toFixed(2)}%</span> · ` : "") +
     `in <b>${fmt(s.inputTokens)}</b> · out <b>${fmt(s.outputTokens)}</b> · reqs <b class="st ${reqCls(s.requests)}">${s.requests}</b> · ` +
-    `ctx <b class="st ${ctxCls((s.maxContext ?? 0) / CTX_LIMIT)}">${fmt(s.maxContext)}</b>`;
+    `ctx <b class="st ${ctxCls((s.maxContext ?? 0) / win)}">${fmt(s.maxContext)}</b>`;
 }
 
 function currentActivity(s) {
@@ -381,16 +383,22 @@ function render(state) {
     ordered.map(([dir, list]) => {
       const procs = state.liveProcs?.[dir] ?? 0;
       const proj = list[0].project ?? "unknown project";
-      const stoppable = dir !== "?" && procs > 0 && !stoppedDirs.has(dir);
-      // The dialog names the run via the stop target's owning harness;
-      // routing itself is the server's job — it resolves the same session
-      // (list[0], snapshot order) through the sessionId we send below.
-      const owner = list.find((s) => s.harness)?.harness;
+      // Several harnesses can share one project directory (zcode and
+      // deepseek both work in the same repo). The stop action belongs to the
+      // harness that (a) supports stopping and (b) actually has the live
+      // processes — never to whichever failed session happens to sort first,
+      // or the button would name one harness and be rejected by another.
+      const ownerSession =
+        list.find((s) => s.harness && harnessById.get(s.harness)?.hasStop) ?? list[0];
+      const owner = ownerSession.harness;
+      const stoppable =
+        dir !== "?" && procs > 0 && !stoppedDirs.has(dir) &&
+        harnessById.get(owner ?? "")?.hasStop === true;
       return `
       <div class="agroup">
         <div class="agroup-head">
           <span title="${esc(dir)}">${esc(shortProject(proj))}</span>
-          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" data-session="${esc(list[0].id)}" data-harness="${esc(owner ?? "")}" title="SIGTERM all ${procs} live process(es) of this ${esc(harnessById.get(owner ?? "")?.label ?? "harness")} run in ${esc(dir)}">⏹ kill ${procs} process${procs === 1 ? "" : "es"}</button>`
+          ${stoppable ? `<button class="stopbtn" data-dir="${esc(dir)}" data-name="${esc(proj)}" data-procs="${procs}" data-session="${esc(ownerSession.id)}" data-harness="${esc(owner ?? "")}" title="SIGTERM all ${procs} live process(es) of this ${esc(harnessById.get(owner ?? "")?.label ?? "harness")} run in ${esc(dir)}">⏹ kill ${procs} process${procs === 1 ? "" : "es"}</button>`
             : stoppedDirs.has(dir) ? `<span class="stoppedmark">⏹ stopped by you</span>` : ""}
         </div>
         ${list.map((s) => {
@@ -458,7 +466,7 @@ function render(state) {
 
   for (const s of state.sessions) {
     const c = document.getElementById("spark-" + s.id);
-    if (c) drawSpark(c, s.sparkline);
+    if (c) drawSpark(c, s.sparkline, ctxWindow(s));
   }
 
   // recent-activity feed: tool calls + session errors + session starts,

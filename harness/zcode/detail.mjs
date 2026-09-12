@@ -3,6 +3,7 @@
 // DB connection and are only hit when the UI asks for a specific session.
 import { Database } from "bun:sqlite";
 import { cfg } from "./config.mjs";
+import { CONV_INPUT_CAP, CONV_TAIL, CONV_TEXT_CAP, CONV_THINK_CAP } from "../lib.mjs";
 
 function roDb() {
   try {
@@ -123,11 +124,8 @@ export function sessionDetail(id) {
 // reasoning / tool rows). The client polls with the cursor returned here —
 // the (message-sequence, part-sequence) pair of the last row it saw — and
 // only rows past that pair come back, so a poll moves bytes proportional
-// to what was actually said, not to the size of the session.
-const CONV_TEXT_CAP = 12_000;
-const CONV_THINK_CAP = 6_000;
-const CONV_INPUT_CAP = 2_000;
-const CONV_TAIL_PARTS = 400; // first load: the last N part rows, not the whole session
+// to what was actually said, not to the size of the session. The text caps
+// and the tail length are shared with the other adapters (../lib.mjs).
 
 const convSel = `
   SELECT json_extract(m.data, '$.role') AS role,
@@ -178,13 +176,13 @@ export function sessionMessages(id, after) {
         WHERE p.session_id = ?
           AND (coalesce(m.sequence,0), coalesce(p.sequence,0)) > (?, ?)
         ORDER BY coalesce(m.sequence,0), coalesce(p.sequence,0)
-        LIMIT ${CONV_TAIL_PARTS}`, [id, ...from]);
+        LIMIT ${CONV_TAIL}`, [id, ...from]);
     } else {
-      // first load: newest CONV_TAIL_PARTS rows, oldest-first for rendering
+      // first load: newest CONV_TAIL rows, oldest-first for rendering
       parts = rows(db, `${convSel}
         WHERE p.session_id = ?
         ORDER BY coalesce(m.sequence,0) DESC, coalesce(p.sequence,0) DESC
-        LIMIT ${CONV_TAIL_PARTS}`, [id]).reverse();
+        LIMIT ${CONV_TAIL}`, [id]).reverse();
     }
     const items = [];
     for (const r of parts) {
