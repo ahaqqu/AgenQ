@@ -60,7 +60,6 @@ For each changed file, verify against these guardrails:
 - The stop action exists only where the harness sets `hasStop: true`, only at project level, behind a confirmation naming the harness and process count, with SIGTERM before SIGKILL.
 - The stop endpoint rejects cross-origin requests.
 - `package.json` and `bun.lock` change together, and `install.sh` plus the README flag list stay in sync with any new flag.
-- README stays current: UI screenshots retaken whole-page with alt text, the feature section updated, and "Where the data comes from" table updated when sources change.
 
 ## Posting contract (any PR comment, incl. thermos findings)
 
