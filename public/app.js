@@ -334,6 +334,34 @@ function renderLegendHarnesses(harnesses) {
   ).join(" · ") || "none mounted";
 }
 
+// harness degradation notices: an adapter degrades part of its data with a
+// warning (an unrecognized log generation, a damaged frame) instead of
+// failing its whole harness or the board — render those so a harness whose
+// data is partially missing never quietly shows nothing. Collapsed to the
+// first few rows; the header expands to the full list.
+let warningsOpen = false;
+function renderWarnings(state) {
+  const bar = $("warnbar");
+  const list = state.warnings ?? [];
+  bar.classList.toggle("show", list.length > 0);
+  if (!list.length) {
+    bar.innerHTML = "";
+    return;
+  }
+  const VISIBLE = 4;
+  const shown = warningsOpen ? list : list.slice(0, VISIBLE);
+  const more = list.length - shown.length;
+  bar.innerHTML =
+    `<div class="wh" title="adapters report degraded data here — click to ${warningsOpen ? "collapse" : "show all"}">⚠ HARNESS WARNINGS — ${list.length} notice${list.length === 1 ? "" : "s"}; the affected data is missing from the board${warningsOpen ? " — click to collapse" : ""}</div>` +
+    shown.map((w) => `<div class="wline">${esc(w)}</div>`).join("") +
+    (more > 0 ? `<div class="wline more">… ${more} more — click to show all</div>` : "");
+}
+
+$("warnbar").addEventListener("click", () => {
+  warningsOpen = !warningsOpen;
+  if (prev) renderWarnings(prev);
+});
+
 function render(state) {
   // copying something? defer the re-render until the selection is gone —
   // swapping innerHTML on a 1.5s timer yanks text out from under the cursor
@@ -343,6 +371,7 @@ function render(state) {
   computeInstances(state.sessions);
   harnessById = new Map((state.harnesses ?? []).map((h) => [h.id, h]));
   renderLegendHarnesses(state.harnesses);
+  renderWarnings(state);
 
   // project filter dropdown
   const projects = [...new Set(state.sessions.map((s) => s.project).filter(Boolean))].sort();

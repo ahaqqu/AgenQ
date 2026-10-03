@@ -201,6 +201,17 @@
   .ticker li.new { animation: slidein .5s ease; }
   @keyframes slidein { from { opacity: 0; transform: translateY(-6px); } }
   .errbar { color: var(--fail); font-size: 12px; padding: 0 20px 10px; }
+  /* harness degradation notices: an adapter that had to skip or drop data
+     (an unrecognized log generation, a damaged frame) reports it here —
+     a harness whose data is partially missing says so instead of showing
+     nothing. Amber, not red: the board itself is healthy. */
+  .warnbar { display: none; margin-bottom: 14px; border: 1px solid var(--run); border-radius: 10px;
+    background: color-mix(in srgb, var(--run) 8%, var(--panel)); }
+  .warnbar.show { display: block; }
+  .warnbar .wh { display: flex; align-items: center; padding: 8px 14px; color: var(--run);
+    font-size: 11px; letter-spacing: 1px; cursor: pointer; }
+  .warnbar .wline { padding: 0 14px 6px; font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
+  .warnbar .wline.more { font-style: italic; padding-bottom: 10px; }
   .activewrap { display: none; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
   .activewrap .thead { display: flex; align-items: center; padding: 8px 14px; background: var(--panel2); color: var(--ok); font-size: 11px; letter-spacing: 1px; cursor: pointer; }
   .activewrap .thead .caret { margin-left: auto; }
@@ -278,6 +289,7 @@
 </header>
   <main>
   <div class="legend" id="legend"></div>
+  <div class="warnbar" id="warnbar"></div>
   <div class="activewrap" id="activewrap">
     <div class="thead" id="activetoggle" title="click to collapse">ACTIVE NOW — activity in the last 5m<span class="caret">▾</span></div>
     <div class="activebar" id="activebar"></div>
