@@ -259,6 +259,13 @@ export function foldEvent(agg, ev) {
       };
     }
 
+    case "turn/start":
+      // DSH's own `todos` projection is turn-scoped — its reducer returns
+      // null at turn/start — so the last list of a finished turn is not the
+      // session's current plan; keep the board in step with DSH's UI
+      agg.todos = [];
+      return null;
+
     case "turn/end": {
       const reason = d.reason ?? {};
       const kind = reason.kind ?? "unknown";
