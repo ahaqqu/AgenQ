@@ -5,7 +5,8 @@ import { homedir } from "node:os";
 
 export function parseArgs(argv) {
   const out = {
-    port: 8787,
+    // the server's own --port is monitor.mjs's business — this config only
+    // carries the zcode telemetry flags
     windowHours: 12,
     db: join(homedir(), ".zcode", "cli", "db", "db.sqlite"),
     agentsDir: join(homedir(), ".zcode", "cli", "agents"),
@@ -14,7 +15,6 @@ export function parseArgs(argv) {
     const i = argv.indexOf(flag);
     if (i >= 0) return argv[i + 1];
   };
-  out.port = Number(take("--port") ?? out.port);
   out.windowHours = Number(take("--window-hours") ?? out.windowHours);
   out.db = take("--db") ?? out.db;
   out.agentsDir = take("--agents-dir") ?? out.agentsDir;

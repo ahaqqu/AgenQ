@@ -7,7 +7,7 @@ variants and the one exception to its read-only promise.
 ## Flags
 
 ```bash
-bun monitor.mjs --port 8787 --window-hours 12 \
+bun monitor.mjs --port 8765 --window-hours 12 \
   --db ~/.zcode/cli/db/db.sqlite \
   --agents-dir ~/.zcode/cli/agents \
   --hermes-db ~/.hermes/state.db \
