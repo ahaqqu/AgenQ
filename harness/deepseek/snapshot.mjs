@@ -18,6 +18,10 @@ import {
 import { newAgg, visibleError } from "./fold.mjs";
 import { keepInWindow, projectFromDir } from "../lib.mjs";
 
+// the skip message's range derives from the supported set so the two
+// cannot drift apart when a new generation is added
+const FOLDS = `v${Math.min(...SUPPORTED_FORMAT_VERSIONS)}–v${Math.max(...SUPPORTED_FORMAT_VERSIONS)}`;
+
 export const ACTIVE_MS = 5 * 60_000; // heartbeat within this = active; idle past it = sleep
 const TICKER_PER_SESSION = 15; // caps one busy agent's share of the merged ticker
 
@@ -204,7 +208,7 @@ export async function snapshot({ now = Date.now() } = {}) {
     // alternative is rendering a future vocabulary's rows under today's names.
     const version = Number(agg.header.version);
     if (Number.isFinite(version) && !SUPPORTED_FORMAT_VERSIONS.has(version)) {
-      warnings.push(`${c.id}: unreadable log format v${version} (this build folds v0–v3) — session skipped`);
+      warnings.push(`${c.id}: unreadable log format v${version} (this build folds ${FOLDS}) — session skipped`);
       continue;
     }
     const corrupt = corruptBytesOf(c.logPath);

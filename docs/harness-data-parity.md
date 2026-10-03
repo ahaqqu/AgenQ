@@ -110,7 +110,7 @@ accidental.
   per-request history, so it cannot feed the sparkline at all. The only thing
   it holds that the logs don't is aggregate timing (listed as recoverable
   above).
-- **An unrecognized deepseek log generation** — the adapter folds v0–v3 and
+- **An unrecognized deepseek log generation** — the adapter folds v0–v4 and
   skips a session whose header names a newer format, reporting it in
   `warnings`, rather than reading a future vocabulary under today's names. A
   damaged frame inside an otherwise readable log is dropped the same way: the

@@ -25,7 +25,10 @@ const GENERATION_RE = /^session(?:\.v([1-9][0-9]*))?\.jsonl(\.zstd)?$/;
 // reader that meets a generation it cannot interpret to refuse rather than
 // silently skip required events — so anything outside this set is skipped
 // with a board warning instead of being folded as the current vocabulary.
-export const SUPPORTED_FORMAT_VERSIONS = new Set([0, 1, 2, 3]);
+export const SUPPORTED_FORMAT_VERSIONS = new Set([0, 1, 2, 3, 4]);
+// v4 (dsh 0.2.0-rc.x) only drops the model/selection event; the fold sources
+// the model from request/header and the assistant/message source anyway, so
+// the v3 fold covers it unchanged.
 
 const TAIL_IDLE_MS = 30_000; // a conversation buffer nobody has polled this long is dropped
 const TAIL_HARD_MAX = 12; // ...and this many are kept whatever happens
