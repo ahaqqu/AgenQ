@@ -59,7 +59,7 @@ stream of small independent Zstandard frames, so the adapter decodes only the
 frames appended since the previous poll and skips logs untouched inside the
 window entirely — a session outside the window contributes nothing but its
 header, and only when a kept session names it as its parent. The adapter reads
-generations v0–v3 and skips a log whose header names a newer format (with a
+generations v0–v4 and skips a log whose header names a newer format (with a
 board warning) rather than folding it under the wrong vocabulary; if a
 committed frame is damaged, it drops that frame, keeps every event after it and
 reports the damage in `warnings` — one bad frame never silences the rest of a

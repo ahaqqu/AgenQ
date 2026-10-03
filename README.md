@@ -17,6 +17,9 @@ AgenQ reads (read-only) the telemetry harnesses already write on disk and turns 
 - **Recent activity** — tool calls, session errors and session starts in one feed (capped at 20 rows), filterable by category; when the failure panel is empty the feed takes the full row width and each row shows more: project, status word, output size and exact timestamps (the failed panel side stays empty in that mode)
 - **Freeze** — the live pill (top right) is a button: click it to pause all board updates (board, detail panel, recent-activity feed) at the current moment — for reading long todos, comparing numbers between runs or taking screenshots; the pill turns amber and shows when it froze, click again to resume, refreshing at once
 - **Failure alerts** — rate limits and crashed agents turn red the moment they happen; a hollow dot means the process already exited
+- **Harness warnings** — when an adapter has to degrade its data (a log generation it can't fold, a damaged frame, an unreadable log), an amber strip at the top of the board lists the notices, so a harness whose data is partially missing says so instead of quietly showing nothing
+
+![AgenQ board with the amber harness-warnings strip under the header, listing a DeepSeek Harness session skipped for a log format the adapter doesn't fold — the rest of the board renders normally around it, the ACTIVE NOW strip carrying a running DeepSeek Harness chip beside a running zcode chip, both marked with their harness letter](docs/screenshot-warnings.png)
 
 ## Quick start
 
