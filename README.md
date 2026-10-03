@@ -29,7 +29,7 @@ Linux, with at least one supported harness already used on the machine — AgenQ
 curl -fsSL https://raw.githubusercontent.com/ahaqqu/AgenQ/main/install.sh | bash
 ```
 
-The installer installs [Bun](https://bun.sh) if it's missing, clones AgenQ to `~/.local/share/agenq`, and starts the board at http://localhost:8787. From then on, `agenq` starts it again (`agenq --port 8791` for a different port).
+The installer installs [Bun](https://bun.sh) if it's missing, clones AgenQ to `~/.local/share/agenq`, and starts the board at http://localhost:8765. From then on, `agenq` starts it again (`agenq --port 8791` for a different port).
 
 To install from a checkout instead: `git clone https://github.com/ahaqqu/AgenQ && cd AgenQ && ./install.sh`.
 

@@ -18,7 +18,7 @@
  * an explicit, user-clicked "stop run". Stop targets are validated against
  * the last snapshot, and the server binds 127.0.0.1 only.
  *
- *   bun monitor.mjs [--port 8787] [--window-hours 12] [--db …] [--agents-dir …]
+ *   bun monitor.mjs [--port 8765] [--window-hours 12] [--db …] [--agents-dir …]
  * (Harness-specific flags are defined in harness/<id>/config.mjs.)
  */
 import { join } from "node:path";
@@ -167,7 +167,7 @@ function startServer(port) {
 
 // Server-own flags only (--port). Harness telemetry flags (--db, --agents-dir)
 // are defined and parsed by each harness's config.mjs.
-const PORT = Number(process.argv[process.argv.indexOf("--port") + 1]) || 8787;
+const PORT = Number(process.argv[process.argv.indexOf("--port") + 1]) || 8765;
 
 try {
   startServer(PORT);

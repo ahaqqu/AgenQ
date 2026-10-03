@@ -1,6 +1,6 @@
 # AgenQ API reference
 
-The board at http://localhost:8787 (or whatever `--port` you chose) is one
+The board at http://localhost:8765 (or whatever `--port` you chose) is one
 Bun process serving two things: the JSON API under `/api/*`, and the static
 frontend files in `public/` — everything else is a static file, served with
 `cache-control: no-cache`, 404 if absent.
