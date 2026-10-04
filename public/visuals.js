@@ -1,16 +1,42 @@
 // AgenQ front-end shared visuals: formatting helpers and the sparkline
 // renderer. Loaded before app.js; both files speak plain globals (no
 // bundler in this project by design).
-const ROLE_EMOJI = {
-  "manager": "🧑‍✈️",
-  "senior-implementer": "🧠",
-  "implementer": "⚡",
-  "test-implementer": "🧪",
-  "reviewer": "🔍",
-  "thermo-nuclear-review-subagent": "🔥",
-  "thermo-nuclear-code-quality-review-subagent": "🧹",
-  "assistant-manager": "🔎",
-};
+
+// Role marks. Roles are telemetry, not board vocabulary: zcode reports the
+// profile a subagent ran under (implementer, general-purpose,
+// documents:visual-judge, …), DSH reports the generic "subagent", and each
+// project renames and retires its own — so there is deliberately no
+// role→icon table here. A role's mark is derived from its own name: the
+// initials of its first words, in an accent hue hashed from the whole string.
+// A role the board has never seen (or one renamed since) renders right with
+// no client edit, the same rule the harness marks below follow.
+function roleMonogram(role) {
+  const words = String(role ?? "").split(/[^a-z0-9]+/i).filter((w) => /^[a-z]/i.test(w));
+  if (!words.length) return "?";
+  return words.slice(0, 3).map((w) => w[0].toUpperCase()).join("");
+}
+// stable hue per string: a known harness id pins its hand-picked one,
+// everything else (any other harness, every role) hashes to the same value
+// on every load — no table to go stale
+function hashHue(str) {
+  let x = 0;
+  for (let i = 0; i < str.length; i++) x = (x * 31 + str.charCodeAt(i)) % 360;
+  return x;
+}
+function roleStyle(role) {
+  const hue = hashHue(role);
+  return `color:hsl(${hue} 85% 74%);border-color:hsl(${hue} 55% 46%);background:hsl(${hue} 75% 60% / .16)`;
+}
+// a main session carries no role — 🧑‍✈️ is the board's own "the one you talked to"
+const MAIN_ICON = "🧑‍✈️";
+// Accepts a session object (uses its `role` field) or a bare role string;
+// returns the full badge markup, or the main-session icon when there is no role
+function roleMark(s) {
+  const role = typeof s === "string" ? s : s?.role;
+  if (!role) return MAIN_ICON;
+  return `<span class="rmark" style="${roleStyle(role)}" title="role: ${esc(role)}">${esc(roleMonogram(role))}</span>`;
+}
+
 // Harness origin marks: the letter is derived from the harness id
 // (zcode → Z, hermes → H, deepseek → D), so any future adapter gets a mark
 // with no map and no client edit. One identical mark on every surface — no
@@ -22,10 +48,7 @@ const ROLE_EMOJI = {
 // (ticker entries), or null.
 const HARNESS_HUE = { "zcode": 212, "hermes": 26, "deepseek": 265 };
 function harnessHue(id) {
-  if (HARNESS_HUE[id] != null) return HARNESS_HUE[id];
-  let x = 0;
-  for (let i = 0; i < id.length; i++) x = (x * 31 + id.charCodeAt(i)) % 360;
-  return x;
+  return HARNESS_HUE[id] ?? hashHue(id);
 }
 function harnessStyle(h) {
   const hue = harnessHue(h);
@@ -136,3 +159,8 @@ function drawSpark(canvas, series, cliff = CTX_LIMIT) {
   }
   ctx.textAlign = "left";
 }
+
+// The role derivation is pure (no DOM), so `bun test` pins its rules:
+// browser pages use the plain globals above, public/visuals.test.mjs imports
+// this file and reads the same functions off globalThis.
+globalThis.VISUALS = { roleMonogram, roleStyle, roleMark, hashHue };
