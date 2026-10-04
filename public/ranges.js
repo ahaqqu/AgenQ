@@ -29,14 +29,26 @@
 
   const bucketStart = (ms, grain) => (grain === "hour" ? startOfHour(ms) : startOfDay(ms));
   const addBuckets = (ms, n, grain) => (grain === "hour" ? addHours(ms, n) : addDays(ms, n));
+  const bucketMs = (grain) => (grain === "hour" ? HOUR_MS : 24 * HOUR_MS);
 
   const grainForSpan = (spanMs) => (spanMs <= 48 * HOUR_MS ? "hour" : "day");
   const grainAllows = (harnessGrain, rangeGrain) => harnessGrain === "hour" || rangeGrain === "day";
 
+  // The next bucket boundary at the grain, always a bucket start. `addBuckets`
+  // alone is not enough: where a DST transition moves the clock *at* midnight
+  // (America/Santiago, Asia/Beirut, …), `setDate` lands on 01:00, which is not
+  // a day bucket start — every day-grain row would then fail to match a walked
+  // boundary and vanish. Re-snapping keeps the walk on the calendar; the
+  // fallback covers a step that snaps backwards (a transition at 01:00 → 00:00).
+  function nextBucket(t, grain) {
+    const next = bucketStart(addBuckets(t, 1, grain), grain);
+    return next > t ? next : addBuckets(t, 1, grain);
+  }
+
   // whole buckets the range covers, at the range's grain
   function rangeBuckets(range) {
     const buckets = [];
-    for (let t = bucketStart(range.from, range.grain); t < range.to; t = addBuckets(t, 1, range.grain)) buckets.push(t);
+    for (let t = bucketStart(range.from, range.grain); t < range.to; t = nextBucket(t, range.grain)) buckets.push(t);
     return buckets;
   }
 
@@ -47,7 +59,7 @@
   function renderedWindow(range, buckets) {
     if (!buckets.length) return { from: range.from, to: range.to, widened: false };
     const from = buckets[0];
-    const to = addBuckets(buckets[buckets.length - 1], 1, range.grain);
+    const to = nextBucket(buckets[buckets.length - 1], range.grain);
     return { from, to, widened: from !== range.from || to > range.to };
   }
 
@@ -59,6 +71,17 @@
     return s.firstAt < range.to && last >= range.from;
   }
 
+  // Does a usage row's own bucket fall inside the range? The row's bucket is
+  // `[at, at + bucketMs(harnessGrain))` — hour or day resolution per harness —
+  // and ranges are half-open `[from, to)`, so a bucket ending exactly at
+  // `from` does not overlap. Range and bucket grain are snapped before
+  // comparison: a day row and a day-grain range both name a calendar day.
+  function bucketOverlapsRange(at, range, harnessGrain) {
+    const start = bucketStart(at, harnessGrain);
+    const end = nextBucket(start, harnessGrain);
+    return start < range.to && end > range.from;
+  }
+
   const monthKey = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; };
 
   const RANGES = {
@@ -66,9 +89,9 @@
     pad2,
     startOfHour, startOfDay, startOfMonth,
     addHours, addDays, addMonths,
-    bucketStart, addBuckets,
+    bucketStart, addBuckets, bucketMs, nextBucket,
     grainForSpan, grainAllows,
-    rangeBuckets, renderedWindow, sessionInRange,
+    rangeBuckets, renderedWindow, sessionInRange, bucketOverlapsRange,
     monthKey,
   };
 

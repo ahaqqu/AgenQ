@@ -9,7 +9,7 @@ monitor how one such tool — ZCode, Hermes and DeepSeek Harness today — expos
 2. a **conversation feed**: the messages of one session, cursor-resumable
    (poll, ~2s cadence, only used by the live conversation tab),
 3. a **stop action**: what "stop this run" means and whether it exists,
-4. a **long-history stats view** (optional): day-attributed usage rows and
+4. a **long-history stats view** (optional): bucket-attributed usage rows and
    session rows behind `/api/stats` and the `/stats.html` dashboard — the
    board's `--window-hours` window does not apply to it.
 
@@ -60,13 +60,19 @@ export default {
   grain: "hour" | "day",           // the finest bucket this harness's telemetry can attribute usage to
   notes: ["…"],                    // per-harness caveats shown verbatim on the page
   usage: [{
-    at,                            // start of the local bucket, epoch ms (localHourStart/localDayStart from ../lib.mjs)
+    at,                            // start of the local bucket, epoch ms (localKeyToMs of a local hour/day label)
     project, provider, model,      // grouping keys; provider/model null when the harness records neither
     requests, inputTokens, outputTokens, cacheRead, cacheCreate,
   }],
   sessions: [{ firstAt, lastAt, project, isSubagent }],
 }
 ```
+
+`grain` is required on **every** path, including the empty shape a missing
+install returns (`emptyStats(grain)` from `../lib.mjs`): the page badges each
+harness with the resolution its telemetry supports, and the registry treats a
+missing or unrecognized grain as a contract error (a warning, and that harness
+is left off the page) rather than guessing a resolution for it.
 
 Report the **finest grain the telemetry actually supports**, and no finer.
 `grain: "hour"` means every usage row carries a real per-request timestamp
@@ -80,13 +86,19 @@ supports would make the page lie, which is worse than showing less.
 
 Usage rows are grouped by bucket × project × provider × model; the page
 buckets and rolls them up client-side (that is what makes a cross-harness "by
-provider" table meaningful). `sessions` are for the counters that cannot be
-bucket-attributed — agents (main sessions), ch (subagents) and summed
-duration — and are counted whole in any range their span intersects.
+provider" table meaningful). `mergeUsage()` and `usageKey()` in `../lib.mjs`
+are the shared implementation of that row identity — use them instead of
+hand-rolling the key, so the three adapters cannot drift on the wire shape.
+`sessions` are for the counters that cannot be bucket-attributed — agents
+(main sessions), ch (subagents) and summed duration — and are counted whole in
+any range their span intersects.
 
-Two rules the page depends on: report bucket starts in the **server's local
-calendar** (`localHourStart` / `localDayStart`), so month labels and range
-edges mean the user's own wall clock, and exclude the sessions the board
+Two rules the page depends on: name buckets by the **server's local calendar**
+(`localHourKey` / `localDayKey`, converted back with `localKeyToMs`), so month
+labels and range edges mean the user's own wall clock — and never round-trip a
+wall-clock string back through SQLite's `strftime('%s', …)`, which reinterprets
+it as UTC and shifts every bucket by the host's offset (`harness/zcode/stats.test.mjs`
+pins this under non-UTC timezones) — and exclude the sessions the board
 excludes (archived/hidden) so the dashboard and the board describe the same
 subset. A harness with no long-history view simply omits `stats` and does not
 appear on the stats page.

@@ -7,7 +7,7 @@ import "./ranges.js";
 const {
   HOUR_MS, startOfHour, startOfDay, addHours, addDays,
   bucketStart, grainForSpan, grainAllows, rangeBuckets, renderedWindow,
-  sessionInRange, monthKey,
+  sessionInRange, bucketOverlapsRange, monthKey,
 } = globalThis.RANGES;
 
 // a fixed local instant, so expectations are timezone-independent
@@ -108,4 +108,46 @@ test("bucketStart collapses to the bucket at the range's grain", () => {
   expect(bucketStart(t, "day")).toBe(T(2026, 9, 28));
   // a day-grain row re-bucketed into a day range lands on the same day
   expect(bucketStart(startOfDay(t), "day")).toBe(startOfDay(t));
+});
+
+test("every walked bucket is its own bucket start (the invariant DST can break)", () => {
+  // A walk that steps by Date arithmetic alone lands on 01:00 after a
+  // midnight DST transition; each bucket must still equal bucketStart(itself)
+  // or the row→bucket match in stats.js silently drops whole days.
+  for (const from of [T(2026, 3, 1), T(2026, 9, 1), T(2026, 10, 20)]) {
+    const buckets = rangeBuckets({ from, to: addDays(from, 60), grain: "day" });
+    expect(buckets).toHaveLength(60);
+    expect(buckets.every((b) => bucketStart(b, "day") === b)).toBe(true);
+  }
+});
+
+test("a day-grain row always matches a walked day bucket", () => {
+  // the failure mode: the walk drifts off midnight, so the row's own
+  // bucketStart is not in the walked set and its tokens vanish
+  const from = T(2026, 9, 1);
+  const buckets = rangeBuckets({ from, to: addDays(from, 45), grain: "day" });
+  const index = new Set(buckets);
+  for (let d = 0; d < 45; d++) {
+    const rowAt = startOfDay(addDays(from, d));
+    expect(index.has(bucketStart(rowAt, "day"))).toBe(true);
+  }
+});
+
+test("bucketOverlapsRange is half-open and grain-aware", () => {
+  const dayRange = { from: T(2026, 9, 28), to: T(2026, 9, 29), grain: "day" };
+  // a day row on the range's own day overlaps
+  expect(bucketOverlapsRange(T(2026, 9, 28, 15), dayRange, "day")).toBe(true);
+  // a day bucket ending exactly at `from` does not (the old magic-constant
+  // bound counted it, naming harnesses with no usage in the range at all)
+  expect(bucketOverlapsRange(T(2026, 9, 27, 0), dayRange, "day")).toBe(false);
+  // ...nor one starting exactly at the exclusive end
+  expect(bucketOverlapsRange(T(2026, 9, 29), dayRange, "day")).toBe(false);
+
+  const hourRange = { from: T(2026, 9, 28, 10), to: T(2026, 9, 28, 12), grain: "hour" };
+  expect(bucketOverlapsRange(T(2026, 9, 28, 10), hourRange, "hour")).toBe(true);
+  expect(bucketOverlapsRange(T(2026, 9, 28, 11, 45), hourRange, "hour")).toBe(true);
+  // the 09:00 hour bucket runs [09:00, 10:00) and ends exactly at `from`
+  expect(bucketOverlapsRange(T(2026, 9, 28, 9, 30), hourRange, "hour")).toBe(false);
+  // the 12:00 bucket starts exactly at the exclusive end
+  expect(bucketOverlapsRange(T(2026, 9, 28, 12, 0), hourRange, "hour")).toBe(false);
 });

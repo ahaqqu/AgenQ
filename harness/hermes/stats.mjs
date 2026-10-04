@@ -8,12 +8,12 @@
 // day's tokens as if they were 24 hours'. Session rows carry the wall-clock
 // span for agents/duration counts.
 import { cfg } from "./config.mjs";
-import { roDb, rows, s2ms, projectFromDir, localDayStart } from "../lib.mjs";
+import { emptyStats, localDayStart, mergeUsage, projectFromDir, roDb, rows, s2ms } from "../lib.mjs";
 import { childKind } from "./snapshot.mjs";
 
 export function stats() {
   const db = roDb(cfg.db);
-  if (!db) return { coverage: null, notes: [], usage: [], sessions: [] };
+  if (!db) return emptyStats("day");
   try {
     const sessionRows = rows(db, `
       SELECT id, cwd, model, model_config,
@@ -23,7 +23,12 @@ export function stats() {
       FROM sessions WHERE archived = 0 AND hidden = 0`);
 
     // optional table (older builds may lack it): usage per (session, model,
-    // provider) with the tasks summed — the finest attribution hermes keeps
+    // provider). Filtered to the main task (`task = ''`), which is exactly
+    // what the board's sessions.*_tokens / api_call_count columns hold —
+    // hermes also records housekeeping work (title_generation, approval,
+    // background_review, vision) in this table, and counting it here would
+    // make BY HARNESS disagree with the board and with this module's own
+    // session-row fallback.
     let taskRows = null;
     try {
       taskRows = rows(db, `
@@ -35,6 +40,7 @@ export function stats() {
                SUM(cache_read_tokens) AS cache_read,
                SUM(cache_write_tokens) AS cache_create
         FROM session_model_usage
+        WHERE task = ''
         GROUP BY session_id, model, billing_provider`);
     } catch {
       taskRows = null;
@@ -49,7 +55,7 @@ export function stats() {
       if (project === undefined) continue;
       const at = s2ms(t.first_seen);
       if (!at) continue;
-      push(usage, localDayStart(at), project, t.model, t.billing_provider, t);
+      mergeUsage(usage, localDayStart(at), project, t.billing_provider, t.model, t);
     }
 
     // fallback for builds without the usage table: the session's own totals
@@ -59,12 +65,12 @@ export function stats() {
         if (!Number(s.api_call_count)) continue;
         const at = s2ms(s.started_at);
         if (!at) continue;
-        push(
+        mergeUsage(
           usage,
           localDayStart(at),
           projectById.get(s.id) ?? null,
-          s.model,
           null,
+          s.model,
           { requests: s.api_call_count, input_tokens: s.input_tokens, output_tokens: s.output_tokens, cache_read: s.cache_read_tokens, cache_create: s.cache_write_tokens },
         );
       }
@@ -100,18 +106,4 @@ export function stats() {
   } finally {
     db?.close();
   }
-}
-
-// merge one usage row into the (bucket, project, provider, model) map
-function push(usage, at, project, model, provider, r) {
-  const key = `${at}|${project ?? ""}|${provider ?? ""}|${model ?? ""}`;
-  const acc =
-    usage.get(key) ??
-    { at, project, provider, model, requests: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreate: 0 };
-  acc.requests += Number(r.requests) || 0;
-  acc.inputTokens += Number(r.input_tokens) || 0;
-  acc.outputTokens += Number(r.output_tokens) || 0;
-  acc.cacheRead += Number(r.cache_read) || 0;
-  acc.cacheCreate += Number(r.cache_create) || 0;
-  usage.set(key, acc);
 }

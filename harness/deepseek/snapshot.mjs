@@ -13,6 +13,7 @@ import {
   listSessionDirs,
   readAggregate,
   sessionHeader,
+  unsupportedGeneration,
   zstdAvailable,
 } from "./log.mjs";
 import { newAgg, visibleError } from "./fold.mjs";
@@ -207,8 +208,8 @@ export async function snapshot({ now = Date.now() } = {}) {
     if (!agg?.header) continue; // empty or unreadable log — nothing to show
     // A generation this fold cannot vouch for is skipped, not guessed at: the
     // alternative is rendering a future vocabulary's rows under today's names.
-    const version = Number(agg.header.version);
-    if (Number.isFinite(version) && !SUPPORTED_FORMAT_VERSIONS.has(version)) {
+    const version = unsupportedGeneration(agg);
+    if (version != null) {
       warnings.push(`${c.id}: unreadable log format v${version} (this build folds ${FOLDS}) — session skipped`);
       continue;
     }

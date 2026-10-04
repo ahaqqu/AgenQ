@@ -102,7 +102,10 @@ function gatherDb() {
   }
 }
 
-async function gatherAgentLinks() {
+/** Manager→subagent links from the agents dir — the board's authoritative
+ * classification (a session is a subagent iff it appears as a link's child),
+ * reused by the stats view so both surfaces agree. */
+export async function gatherAgentLinks() {
   const links = [];
   let dirEntries;
   try {

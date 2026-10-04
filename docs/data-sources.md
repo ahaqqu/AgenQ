@@ -84,7 +84,7 @@ property of each harness, not of AgenQ:
 | Harness | How long the data lives | Usage resolution (and what limits it) |
 |---|---|---|
 | ZCode | Until ZCode's own retention prunes it — AgenQ reads the SQLite DB as-is (on the reference machine: back to late August, ~26k request rows). | **hour** — every `model_usage` row carries `started_at`, `provider_id`, `model_id` and the session's directory, so any range down to a single hour is exact. |
-| Hermes | Until sessions are deleted; archived and hidden sessions are excluded (the board's rule). | **day** — `session_model_usage` keeps per-(session, model, provider) cumulative counts with a first/last-seen pair and no per-request timestamps, so usage is attributed to the day that pair first called the API. A session spanning a month boundary does not split. Its `messages` table carries per-message timestamps but no per-request token split, so it cannot recover a finer grain today. |
+| Hermes | Until sessions are deleted; archived and hidden sessions are excluded (the board's rule). | **day** — `session_model_usage` keeps per-(session, model, provider) cumulative counts with a first/last-seen pair and no per-request timestamps, so usage is attributed to the day that pair first called the API. A session spanning a month boundary does not split. Its `messages` table carries per-message timestamps but no per-request token split, so it cannot recover a finer grain today. Counted at the main task (`task = ''`) — the same rows the board's `sessions.*_tokens` totals hold — so the dashboard's BY HARNESS row matches the board; hermes also records housekeeping work (`title_generation`, `approval`, `background_review`, `vision`) in that table, and summing it in would inflate the totals by roughly a quarter. |
 | DeepSeek Harness | Until a session is deleted or archived — the logs are append-only and DSH keeps immutable generations; on the reference machine ~320 logs / 159 MB back to late August, decoded in seconds. | **hour** — every model call persists a timestamped usage event with provider and model, so the fold's stats accumulator keeps hour × provider × model buckets. |
 
 Whatever a harness has already pruned is gone for every reader, including
@@ -94,4 +94,7 @@ telemetry starts after that range's first whole bucket (numbers there
 undercount; they are never silently padded), and leaves a day-grain harness's
 usage out of an hour-grain range entirely rather than spreading a day across
 24 bars — its agents/duration still count, and the page says which harness
-was left out and why.
+was left out and why. A session log written in a generation the adapter's fold
+cannot interpret is left out too, and named in that harness's notes: the board
+only ever reads in-window sessions, so an old unsupported log would otherwise
+vanish from the stats total with nothing said.

@@ -20,10 +20,16 @@ const MONTH_CAP = 12; // calendar months offered in the picker
 // the range/bucket/grain math lives in ranges.js (loaded before this file) so
 // `bun test` can exercise it headlessly; only presentation helpers are here
 const {
+  HOUR_MS,
   pad2, startOfHour, startOfDay, startOfMonth, addHours, addDays, addMonths,
   bucketStart, addBuckets, grainForSpan, grainAllows, rangeBuckets, renderedWindow,
-  sessionInRange, monthKey,
+  sessionInRange, bucketOverlapsRange, monthKey,
 } = globalThis.RANGES;
+
+// how many buckets a range may render; beyond this the bars stop being
+// readable anyway, and an unbounded spread/innerHTML would fall over on a
+// hand-typed millennial span (see applyCustom)
+const BUCKET_CAP = 2000;
 
 const dShort = (ms) => { const d = new Date(ms); return `${MON[d.getMonth()]} ${d.getDate()}`; };
 const dFull = (ms) => { const d = new Date(ms); return `${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -41,13 +47,15 @@ const parseInputValue = (v) => { const t = Date.parse(v); return Number.isFinite
 
 function presetRange(id, state, now) {
   const hourStart = startOfHour(now);
+  // `relative: true` marks a window measured back from now, which every
+  // render recomputes (see renderSelected)
   switch (id) {
     case "24h":
-      return { id, label: "Last 24 hours", from: addHours(hourStart, -23), to: addHours(hourStart, 1), grain: "hour" };
+      return { id, label: "Last 24 hours", relative: true, from: addHours(hourStart, -23), to: addHours(hourStart, 1), grain: "hour" };
     case "7d":
-      return { id, label: "Last 7 days", from: addDays(startOfDay(now), -6), to: addDays(startOfDay(now), 1), grain: "day" };
+      return { id, label: "Last 7 days", relative: true, from: addDays(startOfDay(now), -6), to: addDays(startOfDay(now), 1), grain: "day" };
     case "30d":
-      return { id, label: "Last 30 days", from: addDays(startOfDay(now), -29), to: addDays(startOfDay(now), 1), grain: "day" };
+      return { id, label: "Last 30 days", relative: true, from: addDays(startOfDay(now), -29), to: addDays(startOfDay(now), 1), grain: "day" };
     case "all": {
       const froms = state.harnesses.map((h) => h.coverage?.from).filter(Boolean);
       const tos = state.harnesses.map((h) => h.coverage?.to).filter(Boolean);
@@ -147,7 +155,7 @@ function aggregate(state, range) {
       }
     } else {
       // usage left out; the note below says why. Sessions still count.
-      if (h.usage.some((r) => r.at >= range.from - 86400_000 && r.at < range.to)) excluded.push(h);
+      if (h.usage.some((r) => bucketOverlapsRange(r.at, range, h.grain))) excluded.push(h);
     }
     for (const s of h.sessions) {
       if (!sessionInRange(s, range)) continue;
@@ -192,11 +200,17 @@ function harnessCoverage(h) {
 
 const hasDataIn = (h, range) =>
   h.sessions.some((s) => sessionInRange(s, range)) ||
-  (grainAllows(h.grain, range.grain) && h.usage.some((r) => { const k = bucketStart(r.at, range.grain); return k >= bucketStart(range.from, range.grain) && k < range.to; }));
+  (grainAllows(h.grain, range.grain) && h.usage.some((r) => bucketOverlapsRange(r.at, range, h.grain)));
 
 function bucketChart(range, agg) {
-  const max = Math.max(1, ...agg.perBucketIn.map((v, i) => v + agg.perBucketOut[i]));
   const n = agg.buckets.length;
+  // a loop, not a spread: a wide range can carry thousands of buckets, and
+  // Math.max(...arr) throws once the argument list overflows the stack
+  let max = 1;
+  for (let i = 0; i < n; i++) {
+    const total = agg.perBucketIn[i] + agg.perBucketOut[i];
+    if (total > max) max = total;
+  }
   const labelEvery = Math.max(1, Math.ceil(n / 12));
   const bars = agg.buckets
     .map((t, i) => {
@@ -340,11 +354,20 @@ function render(state) {
 function renderSelected() {
   const now = Date.now();
   const state = STATE;
-  const range = CURRENT ?? defaultRange(state, now);
+  if (!state) {
+    $("ranges").innerHTML = `<div class="empty">no data loaded yet — press refresh to read the harnesses</div>`;
+    return;
+  }
+  // Relative presets are windows from *now*, so they are recomputed on every
+  // render rather than reused: a "last 24 hours" selected this morning must
+  // not still chart this morning's window after a refresh. Custom ranges and
+  // calendar months are absolute and carried as-is.
+  const range = CURRENT?.relative ? presetRange(CURRENT.id, state, now) : CURRENT ?? defaultRange(state, now);
   if (!range) {
     $("ranges").innerHTML = `<div class="empty">no data on disk yet</div>`;
     return;
   }
+  CURRENT = range;
   // mark the active preset chip
   for (const chip of document.querySelectorAll(".chip[data-preset]")) {
     chip.classList.toggle("active", !CURRENT ? chip.dataset.preset === "30d" : chip.dataset.preset === CURRENT.id);
@@ -361,6 +384,7 @@ function renderSelected() {
 }
 
 function selectPreset(id) {
+  if (!STATE) { $("rangeerr").textContent = "no data loaded yet — press refresh"; return; }
   const range = presetRange(id, STATE, Date.now());
   if (!range) { $("rangeerr").textContent = "no data for that range yet"; return; }
   CURRENT = range;
@@ -369,12 +393,21 @@ function selectPreset(id) {
 }
 
 function applyCustom() {
+  if (!STATE) { $("rangeerr").textContent = "no data loaded yet — press refresh"; return; }
   const from = parseInputValue($("fromin").value);
   const to = parseInputValue($("toin").value);
   const err = $("rangeerr");
   if (from == null || to == null) { err.textContent = "pick both a from and a to time"; return; }
   if (from >= to) { err.textContent = "from must be before to"; return; }
-  CURRENT = customRange(from, to);
+  const range = customRange(from, to);
+  // a hand-typed millennial span would render millions of bars; the grain
+  // steps down first, and past that the range is refused outright
+  const buckets = Math.ceil((range.to - bucketStart(range.from, range.grain)) / (range.grain === "hour" ? HOUR_MS : 86400_000));
+  if (buckets > BUCKET_CAP) {
+    err.textContent = `that range is too wide to chart (${buckets.toLocaleString()} ${range.grain}s) — pick a shorter one, or use all history`;
+    return;
+  }
+  CURRENT = range;
   $("monthpick").value = "";
   renderSelected();
   err.textContent = "";

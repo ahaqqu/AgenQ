@@ -13,10 +13,8 @@ const THINK_TAIL = 600;
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-/** A fresh aggregate; `header` seeds the fields a log header already answers.
- * `withStats` also allocates the per-day usage accumulator the stats dashboard
- * reads — the board polls never pay for it. */
-export function newAgg(header = null, { withStats = false } = {}) {
+/** A fresh aggregate; `header` seeds the fields a log header already answers. */
+export function newAgg(header = null) {
   return {
     header,
     title: null,
@@ -44,10 +42,13 @@ export function newAgg(header = null, { withStats = false } = {}) {
     recentUsage: [],
     recentErrors: [],
     stepStart: null,
-    // stats mode only: local-hour bucket -> provider -> model -> counters.
+    // local-hour bucket -> provider -> model -> counters, accumulated for
+    // every fold (a few Map writes per model call, next to a log parse): the
+    // stats dashboard reads it, and keeping it always-on means a stats load
+    // reuses whatever the board already decoded instead of rebuilding entries.
     // Hour grain (not day) is what lets the dashboard offer a real
     // "last 24 hours" range — every DSH request carries its own timestamp.
-    usageByDay: withStats ? new Map() : null,
+    usageByHour: new Map(),
   };
 }
 
@@ -182,14 +183,14 @@ export function foldEvent(agg, ev) {
       const src = d.message?.source;
       if (src?.model) agg.model = { provider: src.provider ?? null, model: src.model };
 
-      // stats mode: attribute this request to its local day and the model +
-      // provider that actually served it. Every request counts (an aborted
-      // call is still a request), tokens only when the log measured them.
-      if (agg.usageByDay) {
+      // attribute this request to its local hour and the model + provider
+      // that actually served it. Every request counts (an aborted call is
+      // still a request), tokens only when the log measured them.
+      {
         const model = src?.model ?? agg.model?.model ?? null;
         const provider = src?.provider ?? agg.model?.provider ?? null;
-        let byProvider = agg.usageByDay.get(localHourKey(at));
-        if (!byProvider) agg.usageByDay.set(localHourKey(at), (byProvider = new Map()));
+        let byProvider = agg.usageByHour.get(localHourKey(at));
+        if (!byProvider) agg.usageByHour.set(localHourKey(at), (byProvider = new Map()));
         let byModel = byProvider.get(provider);
         if (!byModel) byProvider.set(provider, (byModel = new Map()));
         const cell = byModel.get(model) ?? { requests: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreate: 0 };

@@ -100,7 +100,11 @@ harness can attribute usage.
 - `usage[].at` is the **start of the local bucket** the row belongs to, as
   epoch ms — the beginning of a local hour (`grain: "hour"`) or a local
   midnight (`grain: "day"`). The client filters ranges on it directly, so a
-  "last 24 hours" view needs no server round-trip per range.
+  "last 24 hours" view needs no server round-trip per range. The bucket is a
+  local-calendar label converted to an instant; it is never derived by
+  round-tripping a wall-clock string back through SQLite's `strftime('%s', …)`,
+  which would reinterpret it as UTC and shift every bucket by the host's
+  offset.
 - `grain` is the finest attribution that harness's telemetry supports, and it
   is a property of the data, not a display choice: zcode and DeepSeek Harness
   record a timestamp per request (hour), hermes keeps only cumulative
@@ -108,6 +112,9 @@ harness can attribute usage.
   A harness whose grain is coarser than the requested range contributes no
   usage rows to it — spreading one day's tokens across 24 hourly bars would
   invent detail the telemetry does not have. Its `sessions` still count.
+  Every adapter reports `grain` on every path, including the empty shape for a
+  missing install; a missing or unrecognized value is a contract error that
+  surfaces as a `warnings` entry and leaves that harness off the page.
 - `usage` rows are grouped by bucket × project × provider × model. Grouping
   across harnesses (`at` collides across harnesses on the same bucket) is the
   client's job; that is what makes a provider/model rollup meaningful.
@@ -123,11 +130,14 @@ harness can attribute usage.
   the adapter contract) simply does not appear in `harnesses`.
 
 **Cost:** the first `/api/stats` call after server start may decode whole
-telemetry histories (on a machine with months of DSH logs: a few seconds).
+telemetry histories (on a machine with months of DSH logs: a few seconds, and
+a few hundred MB of decoded aggregates retained for the incremental cache).
 Adapters cache what they decoded, so later calls are incremental and the page
 filters ranges client-side without re-fetching; the refresh button re-reads.
 A harness that fails degrades to a `warnings` entry instead of failing the
-whole response.
+whole response. Adapters run in parallel, and the DSH history walk yields to
+the event loop between log folds (a time budget, not a fixed count), so the
+board's own poll keeps its cadence while a cold stats page computes.
 
 ## GET /api/session/:id/detail
 

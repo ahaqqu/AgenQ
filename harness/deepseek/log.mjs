@@ -30,9 +30,21 @@ export const SUPPORTED_FORMAT_VERSIONS = new Set([0, 1, 2, 3, 4]);
 // the model from request/header and the assistant/message source anyway, so
 // the v3 fold covers it unchanged.
 
+/** Is this log's generation outside what the fold can vouch for? Both readers
+ * gate on it (the board warns per session; stats reports what it skipped), so
+ * it lives here rather than being re-derived in each. */
+export const unsupportedGeneration = (agg) => {
+  const version = Number(agg?.header?.version);
+  return Number.isFinite(version) && !SUPPORTED_FORMAT_VERSIONS.has(version) ? version : null;
+};
+
 const TAIL_IDLE_MS = 30_000; // a conversation buffer nobody has polled this long is dropped
 const TAIL_HARD_MAX = 12; // ...and this many are kept whatever happens
-const LOG_CACHE_MAX = 512; // decoded logs kept; beyond that the coldest are dropped
+// Decoded logs kept, coldest first. Sized so one full-history stats walk
+// (~400 session dirs on a long-lived install) stays resident instead of
+// re-decoding per visit; each entry is a folded aggregate, not the raw log,
+// so the ceiling is a memory budget in the low hundreds of MB.
+const LOG_CACHE_MAX = 512;
 const FP_LEN = 16; // bytes of consumed-log fingerprint
 // An undecodable trailing region larger than this is corruption, not a frame
 // still being appended (DSH fsyncs one small frame per batch), so it is
@@ -128,7 +140,7 @@ export function sessionHeader(path) {
 const logs = new Map(); // path -> entry
 let useClock = 0;
 
-function newEntry(collect, withStats) {
+function newEntry(collect) {
   return {
     ino: -1,
     size: 0,
@@ -136,7 +148,7 @@ function newEntry(collect, withStats) {
     pending: Buffer.alloc(0), // bytes read but not yet decoded (a partial frame)
     pendingText: "", // decoded but not yet a complete line
     corrupt: 0, // bytes dropped as an undecodable committed frame
-    agg: newAgg(null, { withStats }),
+    agg: newAgg(null),
     records: collect ? [] : null,
     tailUsed: collect ? Date.now() : 0,
     used: 0,
@@ -151,18 +163,21 @@ const fingerprintAt = (path, end) =>
 // repairs a torn tail by truncating to the last good frame and re-appending,
 // which can leave a file the same size or larger on the same inode; without
 // the fingerprint that repair would silently freeze the aggregate forever.
-function entryFor(path, st, collect, withStats, reset) {
+//
+// A rebuild re-reads the whole file, so the conversation buffer is rebuilt
+// with it rather than carried: carrying it would duplicate every record, and
+// the carried bytes would describe the pre-repair file. Keeping `collect` on
+// when a buffer was live means the open conversation tab's next poll reuses
+// this pass instead of paying a second full decode.
+function entryFor(path, st, collect, reset) {
   const prev = logs.get(path);
-  // a stats read on an entry the board warmed without the accumulator pays
-  // one full re-decode so the day buckets exist; after that it is incremental
-  let fresh =
-    reset || !prev || prev.ino !== st.ino || st.size < prev.size || (withStats && !prev.agg.usageByDay);
+  let fresh = reset || !prev || prev.ino !== st.ino || st.size < prev.size;
   if (!fresh && prev.size > 0) {
     const fp = fingerprintAt(path, prev.size);
     fresh = fp.length !== prev.fp.length || !fp.equals(prev.fp);
   }
   if (!fresh) return prev;
-  const entry = newEntry(collect, withStats);
+  const entry = newEntry(collect || prev?.records != null);
   entry.ino = st.ino;
   logs.set(path, entry);
   return entry;
@@ -246,17 +261,18 @@ function evictLogs() {
 /**
  * Read one session log and return its aggregate, decoding only what was
  * appended since the previous call. `collect` also accumulates the normalized
- * conversation records used by the live conversation tab (prefer subscribe());
- * `withStats` accumulates per-day usage for the stats dashboard.
+ * conversation records used by the live conversation tab (prefer subscribe()).
+ * The aggregate always carries the per-hour usage accumulator the stats
+ * dashboard reads, so a stats load never rebuilds what the board decoded.
  */
-export function readAggregate(path, { collect = false, reset = false, withStats = false } = {}) {
+export function readAggregate(path, { collect = false, reset = false } = {}) {
   let st;
   try {
     st = statSync(path);
   } catch {
     return null;
   }
-  const entry = entryFor(path, st, collect, withStats, reset);
+  const entry = entryFor(path, st, collect, reset);
   if (collect && !entry.records) entry.records = [];
   if (collect) entry.tailUsed = Date.now();
   entry.used = ++useClock;

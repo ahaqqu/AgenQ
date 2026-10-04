@@ -152,29 +152,45 @@ export async function stopRun(nsId_, directory, { sessions }) {
 // their full on-disk history plus the coverage they actually observed, so
 // the page can tell the user how far each harness's data reaches. stats()
 // is optional in the adapter contract; a harness without one simply does
-// not appear here.
+// not appear here. Adapters run in parallel (an ordered result array keeps
+// the output order): a cold DSH history walk takes seconds, and there is no
+// reason the two SQLite reads should wait behind it on a one-shot page load.
 export async function stats() {
+  const adapters = ADAPTERS.filter((a) => a.stats);
+  const results = await Promise.all(
+    adapters.map(async (adapter) => {
+      try {
+        return { adapter, stats: await adapter.stats() };
+      } catch (e) {
+        return { adapter, error: e?.message ?? String(e) };
+      }
+    }),
+  );
   const harnesses = [];
   const warnings = [];
-  for (const adapter of ADAPTERS) {
-    if (!adapter.stats) continue;
-    try {
-      const s = await adapter.stats();
-      harnesses.push({
-        id: adapter.id,
-        label: adapter.label,
-        emoji: adapter.emoji ?? null,
-        coverage: s.coverage ?? null,
-        // the finest bucket this harness can attribute usage to ("hour" or
-        // "day"); the page needs it to decide whether a range is fine enough
-        grain: s.grain ?? "day",
-        notes: s.notes ?? [],
-        usage: s.usage ?? [],
-        sessions: s.sessions ?? [],
-      });
-    } catch (e) {
-      warnings.push(`${adapter.id}: ${e?.message ?? String(e)}`);
+  for (const { adapter, stats: s, error } of results) {
+    if (error != null) {
+      warnings.push(`${adapter.id}: ${error}`);
+      continue;
     }
+    // grain is the one field the page cannot default: it decides whether a
+    // range is fine enough to attribute this harness's usage at all, so a
+    // silent fallback would mislabel telemetry (and a missing value is a
+    // broken adapter, not a day-grain one)
+    if (s.grain !== "hour" && s.grain !== "day") {
+      warnings.push(`${adapter.id}: stats() returned no usable grain (${JSON.stringify(s.grain)}) — harness skipped`);
+      continue;
+    }
+    harnesses.push({
+      id: adapter.id,
+      label: adapter.label,
+      emoji: adapter.emoji ?? null,
+      coverage: s.coverage ?? null,
+      grain: s.grain,
+      notes: s.notes ?? [],
+      usage: s.usage ?? [],
+      sessions: s.sessions ?? [],
+    });
   }
   return { generatedAt: Date.now(), harnesses, warnings };
 }

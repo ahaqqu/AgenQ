@@ -5,19 +5,23 @@
 // so hour buckets let the dashboard offer a real "last 24 hours" range, and
 // the client can bucket by any range and group by any dimension.
 import { cfg } from "./config.mjs";
-import { roDb, rows, projectFromDir } from "../lib.mjs";
-import { toProjectDir } from "./snapshot.mjs";
+import { emptyStats, mergeUsage, projectFromDir, roDb, rows, localKeyToMs } from "../lib.mjs";
+import { gatherAgentLinks, toProjectDir } from "./snapshot.mjs";
 
-export function stats() {
-  const db = roDb(cfg.db);
-  if (!db) return { coverage: null, notes: [], usage: [], sessions: [] };
+/** `db` is injectable so the bucket-label test can drive a fixture database
+ * under pinned non-UTC timezones; the registry calls it with no arguments. */
+export async function stats({ db: dbPath = cfg.db } = {}) {
+  const db = roDb(dbPath);
+  if (!db) return emptyStats("hour");
   try {
-    // Local-hour bucket start as epoch ms, computed inside SQLite and grouped
-    // by the value (not just a label), so rows from one local hour land in one
-    // bucket whatever the machine's timezone offset is. The round-trip through
-    // strftime('%s', …, 'localtime') is what makes the bucket a real instant.
+    // The bucket is a local-calendar label, not a computed instant: SQLite
+    // names each row's local hour and `localKeyToMs` is the single conversion
+    // to a bucket start. Round-tripping the wall-clock string back through
+    // strftime('%s', …) would reinterpret it as UTC and shift every bucket by
+    // the host's offset (harness/zcode/stats.test.mjs pins this under a
+    // non-UTC TZ).
     const usageRows = rows(db, `
-      SELECT CAST(strftime('%s', strftime('%Y-%m-%d %H:00:00', mu.started_at/1000, 'unixepoch', 'localtime')) AS INTEGER) * 1000 AS bucket,
+      SELECT strftime('%Y-%m-%dT%H', mu.started_at/1000, 'unixepoch', 'localtime') AS bucket,
              s.directory AS directory,
              mu.provider_id AS provider,
              mu.model_id AS model,
@@ -32,8 +36,8 @@ export function stats() {
     // per-session span: from the usage rows when they exist (the board's own
     // firstAt/lastAt source), else the session row's timestamps
     const sessionRows = rows(db, `
-      SELECT s.directory AS directory,
-             s.parent_id AS parent_id,
+      SELECT s.id AS id,
+             s.directory AS directory,
              s.time_created AS time_created,
              s.time_updated AS time_updated,
              MIN(mu.started_at) AS first_at,
@@ -43,18 +47,15 @@ export function stats() {
 
     const usage = new Map();
     for (const r of usageRows) {
-      const project = projectFromDir(toProjectDir(r.directory));
-      const key = `${r.bucket}|${project ?? ""}|${r.provider ?? ""}|${r.model ?? ""}`;
-      const acc =
-        usage.get(key) ??
-        { at: r.bucket, project, provider: r.provider, model: r.model, requests: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreate: 0 };
-      acc.requests += r.requests;
-      acc.inputTokens += r.input_tokens ?? 0;
-      acc.outputTokens += r.output_tokens ?? 0;
-      acc.cacheRead += r.cache_read ?? 0;
-      acc.cacheCreate += r.cache_create ?? 0;
-      usage.set(key, acc);
+      const at = localKeyToMs(r.bucket);
+      mergeUsage(usage, at, projectFromDir(toProjectDir(r.directory)), r.provider, r.model, r);
     }
+
+    // subagent-ness comes from the agents-dir link set, the board's own rule,
+    // so the two surfaces classify a session identically
+    const childIds = new Set(
+      (await gatherAgentLinks()).map((l) => l.childSessionId).filter(Boolean),
+    );
 
     const sessions = [];
     let from = Infinity;
@@ -66,7 +67,7 @@ export function stats() {
         firstAt,
         lastAt,
         project: projectFromDir(toProjectDir(r.directory)),
-        isSubagent: r.parent_id != null,
+        isSubagent: childIds.has(r.id),
       });
       if (firstAt && firstAt < from) from = firstAt;
       if (lastAt && lastAt > to) to = lastAt;
