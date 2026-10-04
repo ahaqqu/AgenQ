@@ -48,7 +48,9 @@
   .legend .lhead { color: var(--dim); font-size: 11px; letter-spacing: 1px; margin: 4px 0 6px; }
   .legend .lrow { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: var(--text); }
   .legend .lrow .status { flex: none; }
-  .legend .lrow .ic { flex: none; min-width: 16px; text-align: center; }
+  /* one fixed slot for every icon (emoji, harness letter, role pill), sized
+     for the widest badge so every row's label starts at the same x */
+  .legend .lrow .ic { flex: none; width: 34px; text-align: left; }
   .legend .lrow .swatch { flex: none; width: 10px; height: 10px; border-radius: 50%; }
   .legend .lrow .sw.blue { background: var(--accent); }
   #poll .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 5px; }

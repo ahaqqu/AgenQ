@@ -118,7 +118,6 @@ let flashUntil = 0;
 const stoppedDirs = new Set(); // projects the user stopped this page-load
 const KID_CAP = 6; // subagent cards shown per run before the "show all" toggle
 const expandedRoots = new Set(); // runs the user expanded past KID_CAP
-const hiddenKidRoot = new Map(); // capped-away kid id -> its root, so jumps can reveal it
 let frozen = false; // live-pill click: pause re-renders — read the board or screenshot it
 
 // showHarness: only for cards outside a marked section (the "other
@@ -155,6 +154,19 @@ function treeHead(root, kids) {
     ${root.project ? `<span class="proj" title="${esc(root.project)}">${esc(shortProject(root.project))}</span>` : ""}
     <span class="title">${esc(root.title ?? "main session")}</span>
     <span class="meta">${ch != null ? `ch <span class="st ${chCls(ch)}">${(ch * 100).toFixed(2)}%</span> · ` : ""}in <b>${fmt(sumIn)}</b> · out <b>${fmt(sum((s) => s.outputTokens))}</b> · reqs <b>${fmt(sum((s) => s.requests))}</b> · ${kids.length} spawned${running ? ` · ${running} running` : ""}${runDur ? ` · live ${runDur}` : ""} · active ${ago(lastAt)}</span>`;
+}
+
+// the cap's toggle: names how many of a run's subagents it is hiding and how
+// many of those are running, and folds the run back once expanded. Empty for
+// a run at or under the cap — the only case that has nothing to reveal.
+function moreToggleHtml(rootId, total, hiddenKids, expanded) {
+  if (total <= KID_CAP) return "";
+  const running = hiddenKids.filter((k) => k.status === "running").length;
+  return `<div class="kidmore"><button class="morebtn" data-root="${esc(rootId)}" title="${
+    expanded ? `collapse this run back to its ${KID_CAP} most recent subagents`
+             : `show all ${total} subagents of this run`}">${
+    expanded ? `▴ show fewer — back to the ${KID_CAP} most recent of ${total}`
+             : `▾ show all ${total} subagents — ${hiddenKids.length} more${running ? `, ${running} running` : ""}`}</button></div>`;
 }
 
 function agentCard(s, showHarness = true) {
@@ -238,20 +250,26 @@ function onStopClick(e) {
   return true;
 }
 
-// click a failed task or a ticker row → jump to the card below and flash it
+// click a failed task or a ticker row → jump to the card below and flash it.
+// The ticker and the FAILED panel list sessions the tree may not be showing —
+// a run's capped-away subagents, or a project the filter excludes — so the
+// jump makes the card reachable first (open the run, lift the filter), or it
+// would silently land on nothing.
 function jumpToCard(id) {
   if (!id) return;
-  // the card may sit behind its run's collapsed subagent list — open the run
-  // first, or a failure/ticker jump would silently land nowhere
-  const owner = hiddenKidRoot.get(id);
-  if (owner) {
-    expandedRoots.add(owner);
-    if (prev) render(prev);
+  let el = document.getElementById("root-" + id)
+    ?? document.getElementById("kid-" + id);
+  if (!el && prev) {
+    const s = prev.sessions.find((x) => x.id === id);
+    if (!s) return;
+    if (filterProject !== "all" && s.project !== filterProject) filterProject = "all";
+    if (s.parentId && prev.roots.includes(s.parentId)) expandedRoots.add(s.parentId);
+    render(prev, true);
+    el = document.getElementById("root-" + id)
+      ?? document.getElementById("kid-" + id);
   }
   flashId = id;
   flashUntil = Date.now() + 1800;
-  const el = document.getElementById("root-" + id)
-    ?? document.getElementById("kid-" + id);
   if (!el) return;
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.remove("flash");
@@ -272,14 +290,15 @@ $("ticker").addEventListener("click", (e) => {
 });
 
 // subagent cap: the toggle shows the rest of a run's cards (or folds them
-// back). The state lives in expandedRoots, so the next poll keeps it.
+// back). The state lives in expandedRoots, so the next poll keeps it; the
+// render is forced, so a click that follows a text selection still lands.
 $("tree").addEventListener("click", (e) => {
   const btn = e.target.closest(".morebtn");
   if (!btn) return;
   const id = btn.dataset.root;
   if (expandedRoots.has(id)) expandedRoots.delete(id);
   else expandedRoots.add(id);
-  if (prev) render(prev);
+  if (prev) render(prev, true);
 });
 
 $("filter").addEventListener("change", () => {
@@ -350,11 +369,13 @@ $("legend").innerHTML = `
 function renderLegendRoles(roles) {
   const box = $("legend-roles");
   if (!box) return;
-  box.innerHTML =
+  const html =
     `<div class="lhead">SUBAGENT ROLES — badge = the role's own initials, a hue of its own</div>` +
     (roles.length
       ? roles.map((r) => `<div class="lrow"><span class="ic">${roleMark(r)}</span> ${esc(r)}</div>`).join("")
       : `<div class="lrow"><span class="ic"></span> no subagent role in this window</div>`);
+  // only on change: a constant swap eats the tooltip under the cursor
+  if (box.innerHTML !== html) box.innerHTML = html;
 }
 
 // the legend's harness list comes from the mounted adapters, not from a
@@ -395,15 +416,26 @@ $("warnbar").addEventListener("click", () => {
   if (prev) renderWarnings(prev);
 });
 
-function render(state) {
+// force: a user-initiated render (the cap toggle, a card jump) must land even
+// while a selection is held — the guard exists to protect a *timer* re-render,
+// not to swallow a click the user just made
+function render(state, force = false) {
   // copying something? defer the re-render until the selection is gone —
   // swapping innerHTML on a 1.5s timer yanks text out from under the cursor
-  const selection = document.getSelection();
-  if (selection && !selection.isCollapsed) return;
+  if (!force) {
+    const selection = document.getSelection();
+    if (selection && !selection.isCollapsed) return;
+  }
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
   computeInstances(state.sessions);
   harnessById = new Map((state.harnesses ?? []).map((h) => [h.id, h]));
   renderLegendHarnesses(state.harnesses);
+  // the legend is board vocabulary, so it lists every role in the snapshot
+  // (not just the filtered view's) — same policy as the harness list above
+  renderLegendRoles(
+    [...new Set(state.sessions.map((s) => s.role).filter(Boolean))]
+      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())),
+  );
   renderWarnings(state);
 
   // project filter dropdown
@@ -416,12 +448,6 @@ function render(state) {
   filterProject = sel.value;
   const matches = (s) => filterProject === "all" || s.project === filterProject;
   $("empty").style.display = state.sessions.some(matches) ? "none" : "block";
-
-  // the legend's role rows are the roles the visible sessions actually carry
-  renderLegendRoles(
-    [...new Set(state.sessions.filter((s) => s.role && matches(s)).map((s) => s.role))]
-      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())),
-  );
 
   // totals
   $("totals").innerHTML =
@@ -507,26 +533,15 @@ function render(state) {
   // a run the user opened.
   const seen = new Set();
   const sections = [];
-  hiddenKidRoot.clear();
   const rootNodes = state.roots.map((rid) => byId.get(rid)).filter(Boolean).sort(byLast);
   for (const root of rootNodes) {
-    if (!root) continue;
     if (!matches(root)) continue;
     seen.add(root.id);
     const kids = (root.children ?? []).map((c) => byId.get(c)).filter(Boolean).sort(byLast);
     kids.forEach((k) => seen.add(k.id));
     const expanded = expandedRoots.has(root.id);
     const shownKids = expanded ? kids : kids.slice(0, KID_CAP);
-    const hiddenKids = kids.slice(shownKids.length);
-    hiddenKids.forEach((k) => hiddenKidRoot.set(k.id, root.id));
-    const hiddenRunning = hiddenKids.filter((k) => k.status === "running").length;
-    const more = kids.length > KID_CAP
-      ? `<div class="kidmore"><button class="morebtn" data-root="${esc(root.id)}" title="${
-          expanded ? `collapse this run back to its ${KID_CAP} most recent subagents`
-                   : `show all ${kids.length} subagents of this run`}">${
-          expanded ? `▴ show fewer — back to the ${KID_CAP} most recent of ${kids.length}`
-                   : `▾ show all ${kids.length} subagents — ${hiddenKids.length} more${hiddenRunning ? `, ${hiddenRunning} running` : ""}`}</button></div>`
-      : "";
+    const more = moreToggleHtml(root.id, kids.length, kids.slice(shownKids.length), expanded);
     sections.push(`
       <div class="root" id="root-${esc(root.id)}">
         <div class="head">${treeHead(root, kids)}</div>
@@ -536,9 +551,9 @@ function render(state) {
         </div>
       </div>`);
   }
-  // forget runs that left the window (a filter change must not reset them)
-  const allRoots = new Set(state.roots);
-  for (const id of [...expandedRoots]) if (!allRoots.has(id)) expandedRoots.delete(id);
+  // keep the expanded set bounded: forget runs that left the window, so a
+  // long-lived tab cannot accumulate ids (a returning run starts collapsed)
+  for (const id of expandedRoots) if (!byId.has(id)) expandedRoots.delete(id);
   const orphans = state.sessions.filter((s) => !seen.has(s.id) && matches(s)).sort(byLast);
   if (orphans.length)
     sections.push(`<div class="root"><div class="head"><span class="title">other sessions</span></div><div class="kids">${orphans.map((s) => agentCard(s, true)).join("")}</div></div>`);

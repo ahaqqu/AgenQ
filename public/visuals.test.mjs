@@ -33,13 +33,30 @@ test("namespace separators, casing and version digits don't leak into the badge"
   expect(roleMonogram(null)).toBe("?");
 });
 
-test("a hue is derived from the whole role string and is stable across loads", () => {
-  expect(hashHue("implementer")).toBe(hashHue("implementer"));
-  expect(hashHue("implementer")).toBeGreaterThanOrEqual(0);
-  expect(hashHue("implementer")).toBeLessThan(360);
+test("a non-ASCII role name still derives its own initials", () => {
+  // roles are project-invented, so they need not be ASCII
+  expect(roleMonogram("レビュアー")).toBe("レ");
+  expect(roleMonogram("Документы:судья")).toBe("ДС");
+});
+
+test("the hue is derived from the whole role string, stably", () => {
+  // pinned values: the hash is an implementation detail, but changing it
+  // recolors every role on the board, so a change must show up here
+  expect(hashHue("implementer")).toBe(16);
+  expect(hashHue("reviewer")).toBe(213);
   // roles that share initials still differ: the hue covers the full string
   expect(hashHue("test-implementer")).not.toBe(hashHue("thermo-nuclear-review-subagent"));
-  expect(roleStyle("reviewer")).toContain(`hsl(${hashHue("reviewer")}`);
+  expect(roleStyle("reviewer").startsWith("color:hsl(213 ")).toBe(true);
+});
+
+test("a role value of any JSON shape renders instead of throwing", () => {
+  // the pre-PR lookup tolerated any telemetry type; the derivation must too
+  for (const role of [123, {}, ["a", "b"], true]) {
+    expect(() => roleMark({ role })).not.toThrow();
+    expect(roleMark({ role })).toContain("rmark");
+  }
+  expect(() => roleStyle(null)).not.toThrow();
+  expect(hashHue(null)).toBe(0);
 });
 
 test("every role gets a badge — known to the board or never seen before", () => {

@@ -11,28 +11,36 @@
 // A role the board has never seen (or one renamed since) renders right with
 // no client edit, the same rule the harness marks below follow.
 function roleMonogram(role) {
-  const words = String(role ?? "").split(/[^a-z0-9]+/i).filter((w) => /^[a-z]/i.test(w));
+  const words = String(role ?? "").split(/[^\p{L}\p{N}]+/u).filter((w) => /^\p{L}/u.test(w));
   if (!words.length) return "?";
   return words.slice(0, 3).map((w) => w[0].toUpperCase()).join("");
 }
 // stable hue per string: a known harness id pins its hand-picked one,
 // everything else (any other harness, every role) hashes to the same value
-// on every load — no table to go stale
+// on every load — no table to go stale. Coerces, because the value comes from
+// telemetry: a malformed role must not throw inside render()
 function hashHue(str) {
+  const s = String(str ?? "");
   let x = 0;
-  for (let i = 0; i < str.length; i++) x = (x * 31 + str.charCodeAt(i)) % 360;
+  for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) % 360;
   return x;
 }
-function roleStyle(role) {
-  const hue = hashHue(role);
-  return `color:hsl(${hue} 85% 74%);border-color:hsl(${hue} 55% 46%);background:hsl(${hue} 75% 60% / .16)`;
+// one accent recipe for every derived mark (harness letters and role pills):
+// hue-tinted text, border and background, so the two read as one family
+function markStyle(hue) {
+  return `color:hsl(${hue} 85% 74%);border-color:hsl(${hue} 55% 46%);background:hsl(${hue} 75% 60% / .15)`;
 }
-// a main session carries no role — 🧑‍✈️ is the board's own "the one you talked to"
-const MAIN_ICON = "🧑‍✈️";
+function roleStyle(role) {
+  return markStyle(hashHue(role));
+}
+// a main session carries no role — 🧑✈️ is the board's own "the one you talked to"
+const MAIN_ICON = "🧑✈️";
 // Accepts a session object (uses its `role` field) or a bare role string;
-// returns the full badge markup, or the main-session icon when there is no role
+// returns the full badge markup, or the main-session icon when there is no
+// role. The string is coerced once here, so every part of the badge (hue,
+// monogram, tooltip) sees the same value whatever telemetry carried.
 function roleMark(s) {
-  const role = typeof s === "string" ? s : s?.role;
+  const role = String(typeof s === "string" ? s : (s?.role ?? ""));
   if (!role) return MAIN_ICON;
   return `<span class="rmark" style="${roleStyle(role)}" title="role: ${esc(role)}">${esc(roleMonogram(role))}</span>`;
 }
@@ -51,8 +59,7 @@ function harnessHue(id) {
   return HARNESS_HUE[id] ?? hashHue(id);
 }
 function harnessStyle(h) {
-  const hue = harnessHue(h);
-  return `color:hsl(${hue} 85% 74%);border-color:hsl(${hue} 55% 46%);background:hsl(${hue} 75% 60% / .14)`;
+  return markStyle(harnessHue(h));
 }
 function harnessMark(s) {
   const h = typeof s === "string" ? s : (s?.harness ?? "");
