@@ -53,6 +53,32 @@ export function parseCursor(after, prefix) {
 export const projectFromDir = (dir) =>
   dir ? (dir.split("/").filter(Boolean).pop() ?? null) : null;
 
+// Local-calendar bucket keys for the stats dashboard. Bucketing is by the
+// user's own calendar (a "September" means the user's September, and midnight
+// means local midnight), so the zcode SQL uses 'localtime' and the event fold
+// uses these — the two must agree. Keys are "YYYY-MM-DD" (day) and
+// "YYYY-MM-DDTHH" (hour); `localKeyToMs` turns either back into the bucket's
+// start instant, which is the form the dashboard's range filter compares.
+export function localDayKey(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function localHourKey(ms) {
+  return `${localDayKey(ms)}T${String(new Date(ms).getHours()).padStart(2, "0")}`;
+}
+
+// "YYYY-MM-DD" → that local midnight; "YYYY-MM-DDTHH" → that local hour start.
+export function localKeyToMs(key) {
+  const [date, hour] = String(key).split("T");
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d, hour ? Number(hour) : 0).getTime();
+}
+
+export const localDayStart = (ms) => localKeyToMs(localDayKey(ms));
+export const localHourStart = (ms) => localKeyToMs(localHourKey(ms));
+
 // Context-window estimates for the fill gauge; unmatched models fall back to
 // the same 200k cliff the sparkline uses.
 const MODEL_WINDOWS = [

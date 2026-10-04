@@ -8,7 +8,10 @@ monitor how one such tool — ZCode, Hermes and DeepSeek Harness today — expos
    its place in the manager→subagent tree (poll, ~1.5s cadence),
 2. a **conversation feed**: the messages of one session, cursor-resumable
    (poll, ~2s cadence, only used by the live conversation tab),
-3. a **stop action**: what "stop this run" means and whether it exists.
+3. a **stop action**: what "stop this run" means and whether it exists,
+4. a **long-history stats view** (optional): day-attributed usage rows and
+   session rows behind `/api/stats` and the `/stats.html` dashboard — the
+   board's `--window-hours` window does not apply to it.
 
 ## The contract
 
@@ -38,8 +41,55 @@ export default {
   // (project-level for ZCode) behind one directory. Throw on failure; the
   // server maps that to a 500.
   async stopRun(directory) { ... },
+
+  // Optional — the long-history view behind GET /api/stats and /stats.html.
+  // Unlike snapshot(), the window does not apply: report everything the
+  // harness's telemetry still holds, plus the coverage it actually observed.
+  // Throw on failure; the registry degrades that harness to a warning.
+  stats() { ... },
 };
 ```
+
+### Stats shape
+
+`stats()` returns `{ coverage, grain, notes, usage, sessions }`:
+
+```js
+{
+  coverage: { from, to } | null,   // observed first/last telemetry timestamp, null when nothing is on disk
+  grain: "hour" | "day",           // the finest bucket this harness's telemetry can attribute usage to
+  notes: ["…"],                    // per-harness caveats shown verbatim on the page
+  usage: [{
+    at,                            // start of the local bucket, epoch ms (localHourStart/localDayStart from ../lib.mjs)
+    project, provider, model,      // grouping keys; provider/model null when the harness records neither
+    requests, inputTokens, outputTokens, cacheRead, cacheCreate,
+  }],
+  sessions: [{ firstAt, lastAt, project, isSubagent }],
+}
+```
+
+Report the **finest grain the telemetry actually supports**, and no finer.
+`grain: "hour"` means every usage row carries a real per-request timestamp
+that can be bucketed to the hour (zcode's `model_usage`, DSH's per-call usage
+events) — it is what lets the dashboard offer a truthful "last 24 hours".
+`grain: "day"` means usage is only known per day (hermes keeps cumulative
+per-session totals with a first/last-seen pair, no per-request rows); the
+dashboard then leaves those rows out of sub-day ranges rather than spreading
+one day's tokens across 24 hourly bars. Declaring a finer grain than the data
+supports would make the page lie, which is worse than showing less.
+
+Usage rows are grouped by bucket × project × provider × model; the page
+buckets and rolls them up client-side (that is what makes a cross-harness "by
+provider" table meaningful). `sessions` are for the counters that cannot be
+bucket-attributed — agents (main sessions), ch (subagents) and summed
+duration — and are counted whole in any range their span intersects.
+
+Two rules the page depends on: report bucket starts in the **server's local
+calendar** (`localHourStart` / `localDayStart`), so month labels and range
+edges mean the user's own wall clock, and exclude the sessions the board
+excludes (archived/hidden) so the dashboard and the board describe the same
+subset. A harness with no long-history view simply omits `stats` and does not
+appear on the stats page.
 
 ### Snapshot shape (per session)
 
@@ -113,6 +163,11 @@ registry only namespaces them.
    configure; the contract's optional `letter` field can override the letter.
 2. Register it in `harness/index.mjs`.
 3. If it has a stop action, implement `stopRun` and set `hasStop: true`.
+4. If it keeps history worth charting (anything with timestamps), implement
+   `stats()`; otherwise omit it — the harness just won't appear on the stats
+   page. `harness/deepseek/stats.mjs` shows the non-SQL shape: it folds every
+   session log with the stats accumulator and costs one full decode of the
+   history on first call, incremental afterwards.
 
 The frontend needs no other changes: sessions from all harnesses merge into
 one time-ordered tree, ticker, Active Now strip and failures panel, and every

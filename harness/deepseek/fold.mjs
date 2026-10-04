@@ -3,7 +3,7 @@
 // `foldEvent` is pure — it mutates the aggregate it is handed and *returns*
 // the conversation record the event produces (or null), so the reader decides
 // whether records are being collected.
-import { CONV_INPUT_CAP, CONV_TEXT_CAP, CONV_THINK_CAP, head, tail } from "../lib.mjs";
+import { CONV_INPUT_CAP, CONV_TEXT_CAP, CONV_THINK_CAP, head, localHourKey, tail } from "../lib.mjs";
 
 export const SPARK_TAIL = 120; // sparkline points kept per agent
 export const CALLS_TAIL = 150; // tool calls kept per agent (ticker + in-flight status)
@@ -13,8 +13,10 @@ const THINK_TAIL = 600;
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-/** A fresh aggregate; `header` seeds the fields a log header already answers. */
-export function newAgg(header = null) {
+/** A fresh aggregate; `header` seeds the fields a log header already answers.
+ * `withStats` also allocates the per-day usage accumulator the stats dashboard
+ * reads — the board polls never pay for it. */
+export function newAgg(header = null, { withStats = false } = {}) {
   return {
     header,
     title: null,
@@ -42,6 +44,10 @@ export function newAgg(header = null) {
     recentUsage: [],
     recentErrors: [],
     stepStart: null,
+    // stats mode only: local-hour bucket -> provider -> model -> counters.
+    // Hour grain (not day) is what lets the dashboard offer a real
+    // "last 24 hours" range — every DSH request carries its own timestamp.
+    usageByDay: withStats ? new Map() : null,
   };
 }
 
@@ -175,6 +181,27 @@ export function foldEvent(agg, ev) {
 
       const src = d.message?.source;
       if (src?.model) agg.model = { provider: src.provider ?? null, model: src.model };
+
+      // stats mode: attribute this request to its local day and the model +
+      // provider that actually served it. Every request counts (an aborted
+      // call is still a request), tokens only when the log measured them.
+      if (agg.usageByDay) {
+        const model = src?.model ?? agg.model?.model ?? null;
+        const provider = src?.provider ?? agg.model?.provider ?? null;
+        let byProvider = agg.usageByDay.get(localHourKey(at));
+        if (!byProvider) agg.usageByDay.set(localHourKey(at), (byProvider = new Map()));
+        let byModel = byProvider.get(provider);
+        if (!byModel) byProvider.set(provider, (byModel = new Map()));
+        const cell = byModel.get(model) ?? { requests: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreate: 0 };
+        cell.requests += 1;
+        if (measured) {
+          cell.inputTokens += prompt;
+          cell.outputTokens += num(usage.outputTokens);
+          cell.cacheRead += num(usage.cacheReadTokens);
+          cell.cacheCreate += num(usage.cacheWriteTokens);
+        }
+        byModel.set(model, cell);
+      }
 
       const step = agg.stepStart;
       const inStep = step && step.turn === d.turn && step.step === d.step;

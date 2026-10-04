@@ -62,9 +62,10 @@ const lockInode = (dir) => {
 
 // Archived sessions are the ones the user put away in the DSH UI. The board
 // mirrors that (like hermes's archived/hidden filter) — monitoring is not a
-// reason to resurrect a session its owner closed.
+// reason to resurrect a session its owner closed. The stats view shares the
+// rule, so both surfaces describe the same subset.
 let archivedCache = { mtimeMs: -1, ids: new Set() };
-function archivedIds() {
+export function archivedIds() {
   const path = join(cfg.dir, "storages", "workspace.json");
   try {
     const st = statSync(path);

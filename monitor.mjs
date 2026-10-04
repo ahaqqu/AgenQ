@@ -28,6 +28,7 @@ import {
   sessionMessages,
   stopRun,
   splitSessionId,
+  stats,
 } from "./harness/index.mjs";
 import { listenerPidOnPort, killAndWait } from "./harness/zcode/proccontrol.mjs";
 
@@ -145,6 +146,16 @@ function startServer(port) {
             { ...(lastGood ?? { sessions: [], roots: [], totals: { inputTokens: 0, outputTokens: 0, requests: 0 }, ticker: [], harnesses: [] }), pollError: lastError },
             { status: lastGood ? 200 : 503 },
           );
+        }
+      }
+      // long-history stats (a separate page, not the polled board): the
+      // first call may decode a whole telemetry history, later calls are
+      // incremental — the adapters cache what they decoded
+      if (url.pathname === "/api/stats") {
+        try {
+          return Response.json(await stats());
+        } catch (e) {
+          return Response.json({ error: String(e?.message ?? e), harnesses: [], warnings: [] }, { status: 500 });
         }
       }
       const rel = url.pathname === "/" ? "index.html" : url.pathname.slice(1);

@@ -146,3 +146,35 @@ export async function stopRun(nsId_, directory, { sessions }) {
   if (result?.error) return result;
   return { harnessId: adapter.id, ...result };
 }
+
+// Stats-dashboard merge (GET /api/stats): every adapter's long-history rows
+// in one JSON. Unlike snapshot(), nothing here is windowed — adapters report
+// their full on-disk history plus the coverage they actually observed, so
+// the page can tell the user how far each harness's data reaches. stats()
+// is optional in the adapter contract; a harness without one simply does
+// not appear here.
+export async function stats() {
+  const harnesses = [];
+  const warnings = [];
+  for (const adapter of ADAPTERS) {
+    if (!adapter.stats) continue;
+    try {
+      const s = await adapter.stats();
+      harnesses.push({
+        id: adapter.id,
+        label: adapter.label,
+        emoji: adapter.emoji ?? null,
+        coverage: s.coverage ?? null,
+        // the finest bucket this harness can attribute usage to ("hour" or
+        // "day"); the page needs it to decide whether a range is fine enough
+        grain: s.grain ?? "day",
+        notes: s.notes ?? [],
+        usage: s.usage ?? [],
+        sessions: s.sessions ?? [],
+      });
+    } catch (e) {
+      warnings.push(`${adapter.id}: ${e?.message ?? String(e)}`);
+    }
+  }
+  return { generatedAt: Date.now(), harnesses, warnings };
+}

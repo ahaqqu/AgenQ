@@ -3,6 +3,7 @@
 // onto the harness-agnostic board.
 import { snapshot } from "./snapshot.mjs";
 import { sessionDetail, sessionMessages } from "./detail.mjs";
+import { stats } from "./stats.mjs";
 import { cfg } from "./config.mjs";
 
 export default {
@@ -14,6 +15,7 @@ export default {
   // per-run stop surface AgenQ could call safely, so no stopRun.
   hasStop: false,
   cfg,
+  stats,
 
   async snapshot(now) {
     return snapshot({ now });

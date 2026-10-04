@@ -5,6 +5,9 @@ Bun process serving two things: the JSON API under `/api/*`, and the static
 frontend files in `public/` — everything else is a static file, served with
 `cache-control: no-cache`, 404 if absent.
 
+Two pages: the live board at `/` and the long-history **stats dashboard** at
+`/stats.html` (linked from the board header), which reads `/api/stats`.
+
 All timestamps are epoch milliseconds. Session ids are namespaced as
 `<harnessId>:<rawId>` (`zcode:a1b2c3`), which is how two harnesses can never
 collide; the harness id is also carried on every object that references one.
@@ -61,6 +64,70 @@ the previous good snapshot with a `pollError` string added — HTTP 200 when a
 previous snapshot exists, 503 on the very first poll. A broken or uninstalled
 harness never blanks the board: its adapter degrades to an empty session list
 and a `warnings` entry instead.
+
+## GET /api/stats
+
+The long-history aggregation behind `/stats.html` — the board's
+`--window-hours` window does not apply here. One call per harness returns
+**all** history that harness's telemetry still holds: timestamped usage
+buckets, whole-session rows for agent/subagent counts and durations, the
+coverage interval AgenQ actually observed, and the **grain** at which that
+harness can attribute usage.
+
+```json
+{
+  "generatedAt": 1789238949661,
+  "harnesses": [
+    {
+      "id": "zcode", "label": "ZCode", "emoji": "🦓",
+      "coverage": { "from": 1787909366017, "to": 1789238178616 },
+      "grain": "hour",
+      "notes": ["Σ in is ZCode's own input_tokens — cache reads and cache creation are recorded separately"],
+      "usage": [
+        { "at": 1789236000000, "project": "AgenQ", "provider": "account:zai-start-plan",
+          "model": "GLM-5.3-Flash", "requests": 812, "inputTokens": 40212345,
+          "outputTokens": 512345, "cacheRead": 30123456, "cacheCreate": 1234567 }
+      ],
+      "sessions": [
+        { "firstAt": 1789238178616, "lastAt": 1789238940200, "project": "AgenQ", "isSubagent": false }
+      ]
+    }
+  ],
+  "warnings": []
+}
+```
+
+- `usage[].at` is the **start of the local bucket** the row belongs to, as
+  epoch ms — the beginning of a local hour (`grain: "hour"`) or a local
+  midnight (`grain: "day"`). The client filters ranges on it directly, so a
+  "last 24 hours" view needs no server round-trip per range.
+- `grain` is the finest attribution that harness's telemetry supports, and it
+  is a property of the data, not a display choice: zcode and DeepSeek Harness
+  record a timestamp per request (hour), hermes keeps only cumulative
+  per-(session, model, provider) totals with a first/last-seen pair (day).
+  A harness whose grain is coarser than the requested range contributes no
+  usage rows to it — spreading one day's tokens across 24 hourly bars would
+  invent detail the telemetry does not have. Its `sessions` still count.
+- `usage` rows are grouped by bucket × project × provider × model. Grouping
+  across harnesses (`at` collides across harnesses on the same bucket) is the
+  client's job; that is what makes a provider/model rollup meaningful.
+- `sessions` are deliberately *not* bucket-attributed — a session can span
+  days, so agent/subagent counts and durations are counted whole in whichever
+  range its span intersects. `project` is `null` when the working directory
+  is unknown.
+- `coverage` is the observed first/last timestamp of that harness's data,
+  `null` when nothing is on disk. The page renders its retention banner from
+  it, and `notes` carries the per-harness caveats (cache-token semantics,
+  excluded archived sessions, hermes's day attribution) verbatim.
+- A harness whose adapter has no long-history view (`stats()` is optional in
+  the adapter contract) simply does not appear in `harnesses`.
+
+**Cost:** the first `/api/stats` call after server start may decode whole
+telemetry histories (on a machine with months of DSH logs: a few seconds).
+Adapters cache what they decoded, so later calls are incremental and the page
+filters ranges client-side without re-fetching; the refresh button re-reads.
+A harness that fails degrades to a `warnings` entry instead of failing the
+whole response.
 
 ## GET /api/session/:id/detail
 
