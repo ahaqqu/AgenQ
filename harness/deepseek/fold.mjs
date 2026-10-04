@@ -3,7 +3,7 @@
 // `foldEvent` is pure — it mutates the aggregate it is handed and *returns*
 // the conversation record the event produces (or null), so the reader decides
 // whether records are being collected.
-import { CONV_INPUT_CAP, CONV_TEXT_CAP, CONV_THINK_CAP, head, tail } from "../lib.mjs";
+import { CONV_INPUT_CAP, CONV_TEXT_CAP, CONV_THINK_CAP, head, localHourKey, tail } from "../lib.mjs";
 
 export const SPARK_TAIL = 120; // sparkline points kept per agent
 export const CALLS_TAIL = 150; // tool calls kept per agent (ticker + in-flight status)
@@ -42,6 +42,13 @@ export function newAgg(header = null) {
     recentUsage: [],
     recentErrors: [],
     stepStart: null,
+    // local-hour bucket -> provider -> model -> counters, accumulated for
+    // every fold (a few Map writes per model call, next to a log parse): the
+    // stats dashboard reads it, and keeping it always-on means a stats load
+    // reuses whatever the board already decoded instead of rebuilding entries.
+    // Hour grain (not day) is what lets the dashboard offer a real
+    // "last 24 hours" range — every DSH request carries its own timestamp.
+    usageByHour: new Map(),
   };
 }
 
@@ -175,6 +182,27 @@ export function foldEvent(agg, ev) {
 
       const src = d.message?.source;
       if (src?.model) agg.model = { provider: src.provider ?? null, model: src.model };
+
+      // attribute this request to its local hour and the model + provider
+      // that actually served it. Every request counts (an aborted call is
+      // still a request), tokens only when the log measured them.
+      {
+        const model = src?.model ?? agg.model?.model ?? null;
+        const provider = src?.provider ?? agg.model?.provider ?? null;
+        let byProvider = agg.usageByHour.get(localHourKey(at));
+        if (!byProvider) agg.usageByHour.set(localHourKey(at), (byProvider = new Map()));
+        let byModel = byProvider.get(provider);
+        if (!byModel) byProvider.set(provider, (byModel = new Map()));
+        const cell = byModel.get(model) ?? { requests: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreate: 0 };
+        cell.requests += 1;
+        if (measured) {
+          cell.inputTokens += prompt;
+          cell.outputTokens += num(usage.outputTokens);
+          cell.cacheRead += num(usage.cacheReadTokens);
+          cell.cacheCreate += num(usage.cacheWriteTokens);
+        }
+        byModel.set(model, cell);
+      }
 
       const step = agg.stepStart;
       const inStep = step && step.turn === d.turn && step.step === d.step;

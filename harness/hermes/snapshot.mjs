@@ -94,7 +94,8 @@ function thinkingOf(modelConfig) {
 // Hermes's own child taxonomy lives in model_config markers (see
 // hermes_state_schema.py v16): _delegate_from = delegate subagent,
 // _branched_from / _reset_from = continuations of the same conversation.
-const childKind = (modelConfig) => {
+// The stats view shares the rule.
+export const childKind = (modelConfig) => {
   try {
     const mc = JSON.parse(modelConfig ?? "{}");
     if (mc._delegate_from != null) return "delegate";

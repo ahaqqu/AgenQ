@@ -53,6 +53,64 @@ export function parseCursor(after, prefix) {
 export const projectFromDir = (dir) =>
   dir ? (dir.split("/").filter(Boolean).pop() ?? null) : null;
 
+// Local-calendar bucket keys for the stats dashboard. Bucketing is by the
+// user's own calendar (a "September" means the user's September, and midnight
+// means local midnight). A bucket is named by a wall-clock label and only then
+// turned into an instant: keys are "YYYY-MM-DD" (day) and "YYYY-MM-DDTHH"
+// (hour), and `localKeyToMs` is the single conversion back to a bucket's start.
+// Producers must label, not round-trip an instant through SQLite — the zcode
+// SQL emits strftime('%Y-%m-%dT%H', …, 'localtime') and the DSH fold uses
+// `localHourKey`, with harness/zcode/stats.test.mjs enforcing that the two
+// agree under a pinned non-UTC TZ.
+export function localDayKey(ms) {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function localHourKey(ms) {
+  return `${localDayKey(ms)}T${String(new Date(ms).getHours()).padStart(2, "0")}`;
+}
+
+// "YYYY-MM-DD" → that local midnight; "YYYY-MM-DDTHH" → that local hour start.
+export function localKeyToMs(key) {
+  const [date, hour] = String(key).split("T");
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(y, m - 1, d, hour ? Number(hour) : 0).getTime();
+}
+
+export const localDayStart = (ms) => localKeyToMs(localDayKey(ms));
+export const localHourStart = (ms) => localKeyToMs(localHourKey(ms));
+
+// ---------- stats rows ----------
+
+/** The empty shape every stats() returns for a missing/empty install. `grain`
+ * is part of it: the page badges each harness with the resolution its
+ * telemetry supports, and that is true even when nothing is on disk. */
+export const emptyStats = (grain) => ({ coverage: null, grain, notes: [], usage: [], sessions: [] });
+
+/** Row identity for the stats dashboard's usage rows: one row per (bucket
+ * instant, project, provider, model), the shape harness/README.md documents. */
+export const usageKey = (at, project, provider, model) =>
+  `${at}|${project ?? ""}|${provider ?? ""}|${model ?? ""}`;
+
+/** Merge one harness usage row into the shared accumulator map, so the three
+ * adapters cannot drift on keys or counters. `counters` carries the SQL/event
+ * names (requests, input_tokens, …) or the wire names (inputTokens, …). */
+export function mergeUsage(usage, at, project, provider, model, counters) {
+  const key = usageKey(at, project, provider, model);
+  const row =
+    usage.get(key) ??
+    { at, project, provider, model, requests: 0, inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreate: 0 };
+  row.requests += Number(counters.requests) || 0;
+  row.inputTokens += Number(counters.inputTokens ?? counters.input_tokens) || 0;
+  row.outputTokens += Number(counters.outputTokens ?? counters.output_tokens) || 0;
+  row.cacheRead += Number(counters.cacheRead ?? counters.cache_read) || 0;
+  row.cacheCreate += Number(counters.cacheCreate ?? counters.cache_create) || 0;
+  usage.set(key, row);
+  return row;
+}
+
 // Context-window estimates for the fill gauge; unmatched models fall back to
 // the same 200k cliff the sparkline uses.
 const MODEL_WINDOWS = [

@@ -4,6 +4,7 @@
 import { snapshot, gatherLiveProcs } from "./snapshot.mjs";
 import { sessionDetail, sessionMessages } from "./detail.mjs";
 import { stopRun } from "./proccontrol.mjs";
+import { stats } from "./stats.mjs";
 import { cfg } from "./config.mjs";
 
 export default {
@@ -12,6 +13,7 @@ export default {
   emoji: "🦓",
   hasStop: true,
   cfg,
+  stats,
 
   async snapshot(now) {
     const snap = await snapshot({ now });

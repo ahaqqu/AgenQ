@@ -10,8 +10,8 @@ import { cfg, WINDOW_MS } from "./config.mjs";
 
 // directories inside a .zcode state dir (global or project-local) are not
 // project dirs — subagent session rows point there; children inherit their
-// manager's directory instead
-const toProjectDir = (dir) =>
+// manager's directory instead. The stats view shares the rule.
+export const toProjectDir = (dir) =>
   dir && !dir.includes("/.zcode/") && !dir.endsWith("/.zcode") ? dir : null;
 
 function roDb() {
@@ -102,7 +102,10 @@ function gatherDb() {
   }
 }
 
-async function gatherAgentLinks() {
+/** Manager→subagent links from the agents dir — the board's authoritative
+ * classification (a session is a subagent iff it appears as a link's child),
+ * reused by the stats view so both surfaces agree. */
+export async function gatherAgentLinks() {
   const links = [];
   let dirEntries;
   try {

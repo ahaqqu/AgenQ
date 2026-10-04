@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgenQ — stats</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131824; --panel2: #1a2130; --line: #232c3f;
+    --text: #dbe4f0; --dim: #7d8aa0; --accent: #6ea8fe;
+    --ok: #3fb96f; --run: #e8b23f; --fail: #e5534b; --idle: #55607a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px; padding: 14px 20px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5;
+    background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(4px);
+  }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: 1px; white-space: nowrap; }
+  header h1 span { color: var(--accent); }
+  header h1 a { color: inherit; text-decoration: none; }
+  #backto { color: var(--dim); font-size: 12px; text-decoration: none; white-space: nowrap; }
+  #backto:hover { color: var(--text); }
+  #refresh {
+    margin-left: auto; background: var(--panel2); color: var(--dim); border: 1px solid var(--line);
+    border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 10px; cursor: pointer; white-space: nowrap;
+  }
+  #refresh:hover { color: var(--text); }
+  #refresh.busy { color: var(--run); border-color: var(--run); }
+  #generated { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  main { padding: 18px 20px 60px; max-width: 1180px; margin: 0 auto; }
+  .alert {
+    margin-bottom: 14px; padding: 10px 14px; border: 1px solid var(--fail);
+    background: color-mix(in srgb, var(--fail) 12%, var(--panel)); border-radius: 8px; color: #ffb3ae; font-size: 12px;
+  }
+  .alert:empty { display: none; }
+  .alert.warn { border-color: var(--run); background: color-mix(in srgb, var(--run) 10%, var(--panel)); color: var(--run); }
+  /* sits below the selected range's tables: the numbers first, the caveats
+     about where they come from and how finely they resolve right after */
+  .coverage { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin-top: 6px; }
+  .coverage .chead { padding: 8px 14px; background: var(--panel2); color: var(--dim); font-size: 11px; letter-spacing: 1px; border-radius: 10px 10px 0 0; }
+  .coverage .cbody { padding: 10px 14px 12px; }
+  .crow { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; font-size: 12px; flex-wrap: wrap; }
+  .crow .span { color: var(--text); }
+  .crow .days { color: var(--dim); font-size: 11px; }
+  .crow .none { color: var(--dim); font-style: italic; }
+  .crow .grain { font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--dim); }
+  .cnote { padding: 0 0 2px 24px; color: var(--dim); font-size: 11px; }
+  .explain { padding: 8px 14px 12px; color: var(--dim); font-size: 11.5px; border-top: 1px solid var(--line); margin-top: 6px; }
+  /* range toolbar: preset chips + a custom from/to pair */
+  .rangebar { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin-bottom: 18px; }
+  .rangebar .rhead { padding: 8px 14px; background: var(--panel2); color: var(--dim); font-size: 11px; letter-spacing: 1px; border-radius: 10px 10px 0 0; }
+  .rangebar .rbody { padding: 10px 14px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+  .chip {
+    background: var(--bg); color: var(--dim); border: 1px solid var(--line);
+    border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 10px; cursor: pointer; white-space: nowrap;
+  }
+  .chip:hover { color: var(--text); border-color: var(--accent); }
+  .chip.active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  select#monthpick {
+    background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 6px;
+  }
+  .rangebar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 2px; }
+  .rangebar label { color: var(--dim); font-size: 11px; display: inline-flex; align-items: center; gap: 5px; }
+  .rangebar input[type="datetime-local"] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; font: inherit; font-size: 11px; padding: 2px 5px;
+  }
+  .rangeerr { color: var(--fail); font-size: 11px; }
+  .rangeblock { margin-bottom: 34px; }
+  .rangeblock > h2 { font-size: 14px; margin: 0 0 2px; letter-spacing: 1px; }
+  .rangeblock > .sub { color: var(--dim); font-size: 11px; margin: 0 0 10px; }
+  .partial { color: var(--run); font-size: 11.5px; margin: 0 0 10px; }
+  .partial div { padding: 1px 0; }
+  /* bucket diagram: one stacked column per bucket, in (blue) below out (green) */
+  .daily { display: flex; align-items: flex-end; gap: 2px; height: 130px; padding: 14px 8px 0;
+    border: 1px solid var(--line); border-radius: 10px 10px 0 0; border-bottom: 0; background: var(--panel); position: relative; }
+  .daily .bar { flex: 1 1 0; min-width: 2px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+  .daily .bar .seg { width: 100%; }
+  .daily .bar .seg.in { background: color-mix(in srgb, var(--accent) 75%, transparent); border-radius: 2px 2px 0 0; }
+  .daily .bar .seg.out { background: color-mix(in srgb, var(--ok) 80%, transparent); }
+  .daily .bar.void { background: repeating-linear-gradient(0deg, transparent 0 4px, var(--line) 4px 5px); opacity: .25; border-radius: 2px; }
+  .daily .ymax { position: absolute; top: 4px; left: 10px; font-size: 10px; color: var(--dim); }
+  .daxis { display: flex; gap: 2px; padding: 4px 8px 8px; border: 1px solid var(--line); border-top: 0;
+    border-radius: 0 0 10px 10px; background: var(--panel); margin-bottom: 16px; }
+  .daxis .cell { flex: 1 1 0; min-width: 2px; font-size: 9px; color: var(--dim); overflow: visible; white-space: nowrap; }
+  .dlegend { position: absolute; top: 4px; right: 10px; font-size: 10px; color: var(--dim); }
+  .dlegend .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin: 0 3px 0 8px; vertical-align: baseline; }
+  .dlegend .sw.in { background: var(--accent); }
+  .dlegend .sw.out { background: var(--ok); }
+  .gtables { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 950px) { .gtables { grid-template-columns: 1fr; } }
+  .gtable { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+  .gtable .ghead { padding: 7px 12px; background: var(--panel2); color: var(--dim); font-size: 11px; letter-spacing: 1px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 3px 8px; text-align: right; white-space: nowrap; }
+  th { color: var(--dim); font-weight: 400; font-size: 10px; letter-spacing: .5px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }
+  td { color: var(--text); }
+  td.dim { color: var(--dim); }
+  td .share { display: inline-flex; width: 100%; max-width: 130px; height: 8px; border-radius: 3px; overflow: hidden; background: var(--bg); vertical-align: middle; }
+  td .share .s { display: block; height: 100%; }
+  td .share .s.in { background: var(--accent); }
+  td .share .s.out { background: var(--ok); }
+  .empty { color: var(--dim); padding: 40px; text-align: center; }
+  .loading { color: var(--dim); padding: 40px; text-align: center; font-style: italic; }
+  .loading .spin { display: inline-block; animation: spin 1.2s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .footnote { color: var(--dim); font-size: 10.5px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><a href="/">Agen<span>Q</span></a> — stats</h1>
+  <a id="backto" href="/">← live board</a>
+  <span id="generated"></span>
+  <button id="refresh" title="re-read every harness's telemetry — the first call after a server start may take a while on large histories">refresh</button>
+</header>
+<main>
+  <div class="alert" id="alert"></div>
+  <div class="rangebar">
+    <div class="rhead">RANGE</div>
+    <div class="rbody" id="rangebar">
+      <button class="chip" data-preset="24h" title="the last 24 whole local hours">last 24 hours</button>
+      <button class="chip" data-preset="7d" title="today and the six days before it">last 7 days</button>
+      <button class="chip" data-preset="30d" title="today and the 29 days before it">last 30 days</button>
+      <select id="monthpick" title="one calendar month"><option value="">month…</option></select>
+      <button class="chip" data-preset="all" title="everything every harness still holds">all history</button>
+      <span class="sep"></span>
+      <label>from <input type="datetime-local" id="fromin"></label>
+      <label>to <input type="datetime-local" id="toin"></label>
+      <button class="chip" id="applybtn" title="use the from/to pair above">apply range</button>
+      <span class="rangeerr" id="rangeerr"></span>
+    </div>
+  </div>
+  <div id="ranges"><div class="loading">…</div></div>
+  <div class="coverage" id="coverage">
+    <div class="chead">DATA COVERAGE — how far back each harness's telemetry reaches, and how finely it can be attributed</div>
+    <div class="cbody" id="coverage-body"><div class="loading"><span class="spin">◌</span> reading telemetry histories… the first pass can take a while</div></div>
+    <div class="explain">Every harness keeps its own telemetry for its own length of time, and records usage at its own resolution — AgenQ can only chart what is still on disk,
+      at the grain the telemetry actually supports. A range that starts before a harness's coverage is marked <span style="color:var(--run)">partial</span> for that harness (its numbers there undercount,
+      they are not wrong); a range finer than a harness's own resolution leaves that harness's usage out of the chart rather than spreading a coarser bucket across it.</div>
+  </div>
+</main>
+<script src="visuals.js"></script>
+<script src="ranges.js"></script>
+<script src="stats.js"></script>
+</body>
+</html>
