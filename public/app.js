@@ -1,6 +1,7 @@
 // AgenQ front end — polls /api/state, diffs snapshots, renders the board.
-// Dependency-free on purpose; visuals.js and detail.js carry the sparkline
-// renderer and the lazy detail panel. The fun layer is yours to restyle.
+// Dependency-free on purpose; marks.js carries the derived harness/role marks
+// (and the escaping their markup needs), visuals.js the formatting and the
+// sparkline renderer, detail.js the lazy detail panel. The fun layer is yours.
 
 const byLast = (a, b) => (b.lastAt ?? b.firstAt ?? 0) - (a.lastAt ?? a.firstAt ?? 0);
 

@@ -10,8 +10,8 @@
 // across 24 hourly bars would invent detail the telemetry does not have — so
 // its usage is left out of sub-day ranges (with a visible note; its
 // agents/duration still count) and summed into day buckets for coarser ones.
-// Plain globals like the rest of the frontend; visuals.js provides fmt, dur,
-// esc, $, harnessMark.
+// Plain globals like the rest of the frontend; marks.js provides esc and the
+// derived harness marks, visuals.js fmt, dur and $.
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTH_CAP = 12; // calendar months offered in the picker

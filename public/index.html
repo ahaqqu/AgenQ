@@ -150,7 +150,7 @@
   .kid .model { color: var(--dim); font-size: 11px; margin-left: auto; }
   /* inline harness origin mark: a boxed letter (Z/H, first letter of the
      harness id), identical on every item type; per-harness accent color is
-     applied inline by harnessStyle() in visuals.js. The full name is in
+     applied inline by harnessStyle() in marks.js. The full name is in
      the tooltip and the legend */
   .hmark {
     font-size: 9px; flex: none; cursor: default;
@@ -158,7 +158,7 @@
     color: var(--dim); font-weight: 700; letter-spacing: .5px;
   }
   /* role mark: the role's own initials in a hue derived from its name (see
-     roleMark() in visuals.js) — a pill, so it never reads as a second
+     roleMark() in marks.js) — a pill, so it never reads as a second
      harness letter next to the boxed .hmark */
   .rmark {
     font-size: 9px; flex: none; cursor: default; font-weight: 700; letter-spacing: .5px;
@@ -337,6 +337,7 @@
   <div class="tree" id="tree"></div>
   <div class="empty" id="empty">no sessions in the window yet — start a session in any mounted harness</div>
 </main>
+<script src="marks.js"></script>
 <script src="visuals.js"></script>
 <script src="detail.js"></script>
 <script src="app.js"></script>

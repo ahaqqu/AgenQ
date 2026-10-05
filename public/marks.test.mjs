@@ -1,12 +1,12 @@
-// Pins the role-mark derivation — the rule that lets the board render any
-// role a harness reports without a fixed role→icon table. Roles are
-// telemetry (zcode profile ids today, whatever a project renames them to
-// tomorrow), so the only thing that may be asserted here is that the mark
-// follows the role's own name. Run: bun test
+// Pins the derived-mark rules — the rule that lets the board render any role
+// or harness a harness reports without a fixed role→icon or harness→letter
+// table. Roles are telemetry (zcode profile ids today, whatever a project
+// renames them to tomorrow), so the only thing that may be asserted here is
+// that the mark follows the role's own name. Run: bun test
 import { test, expect } from "bun:test";
-import "./visuals.js";
+import "./marks.js";
 
-const { roleMonogram, roleStyle, roleMark, hashHue } = globalThis.VISUALS;
+const { roleMonogram, roleStyle, roleMark, hashHue, harnessHue, harnessMark } = globalThis.MARKS;
 
 test("a role's badge is its own initials, however many words it has", () => {
   expect(roleMonogram("implementer")).toBe("I");
@@ -76,4 +76,23 @@ test("the role string is escaped into the badge's tooltip", () => {
   const html = roleMark({ role: "<img src=x onerror=alert(1)>" });
   expect(html).not.toContain("<img");
   expect(html).toContain("&lt;img");
+});
+
+test("a harness mark is its id's first letter in the id's own hue", () => {
+  // known ids keep their hand-picked hue (pinned: recoloring the board's three
+  // harnesses is a visible change, so it must show up here)
+  expect(harnessHue("zcode")).toBe(212);
+  expect(harnessHue("hermes")).toBe(26);
+  expect(harnessHue("deepseek")).toBe(265);
+  expect(harnessMark("zcode")).toContain(">Z<");
+  expect(harnessMark({ harness: "hermes" })).toContain(">H<");
+  // an adapter nobody has written yet gets a stable hue of its own, and a
+  // session with no harness gets no mark at all
+  expect(harnessHue("future-harness")).toBe(hashHue("future-harness"));
+  expect(harnessMark("future-harness")).toContain(">F<");
+  expect(harnessMark({})).toBe("");
+  expect(harnessMark(null)).toBe("");
+  // harness ids are telemetry too: a malformed one must not throw inside render()
+  expect(() => harnessMark({ harness: 123 })).not.toThrow();
+  expect(() => harnessMark({ harness: ["zcode"] })).not.toThrow();
 });

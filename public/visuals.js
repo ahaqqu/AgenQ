@@ -1,71 +1,7 @@
-// AgenQ front-end shared visuals: formatting helpers and the sparkline
-// renderer. Loaded before app.js; both files speak plain globals (no
-// bundler in this project by design).
-
-// Role marks. Roles are telemetry, not board vocabulary: zcode reports the
-// profile a subagent ran under (implementer, general-purpose,
-// documents:visual-judge, …), DSH reports the generic "subagent", and each
-// project renames and retires its own — so there is deliberately no
-// role→icon table here. A role's mark is derived from its own name: the
-// initials of its first words, in an accent hue hashed from the whole string.
-// A role the board has never seen (or one renamed since) renders right with
-// no client edit, the same rule the harness marks below follow.
-function roleMonogram(role) {
-  const words = String(role ?? "").split(/[^\p{L}\p{N}]+/u).filter((w) => /^\p{L}/u.test(w));
-  if (!words.length) return "?";
-  return words.slice(0, 3).map((w) => w[0].toUpperCase()).join("");
-}
-// stable hue per string: a known harness id pins its hand-picked one,
-// everything else (any other harness, every role) hashes to the same value
-// on every load — no table to go stale. Coerces, because the value comes from
-// telemetry: a malformed role must not throw inside render()
-function hashHue(str) {
-  const s = String(str ?? "");
-  let x = 0;
-  for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) % 360;
-  return x;
-}
-// one accent recipe for every derived mark (harness letters and role pills):
-// hue-tinted text, border and background, so the two read as one family
-function markStyle(hue) {
-  return `color:hsl(${hue} 85% 74%);border-color:hsl(${hue} 55% 46%);background:hsl(${hue} 75% 60% / .15)`;
-}
-function roleStyle(role) {
-  return markStyle(hashHue(role));
-}
-// a main session carries no role — 🧑✈️ is the board's own "the one you talked to"
-const MAIN_ICON = "🧑✈️";
-// Accepts a session object (uses its `role` field) or a bare role string;
-// returns the full badge markup, or the main-session icon when there is no
-// role. The string is coerced once here, so every part of the badge (hue,
-// monogram, tooltip) sees the same value whatever telemetry carried.
-function roleMark(s) {
-  const role = String(typeof s === "string" ? s : (s?.role ?? ""));
-  if (!role) return MAIN_ICON;
-  return `<span class="rmark" style="${roleStyle(role)}" title="role: ${esc(role)}">${esc(roleMonogram(role))}</span>`;
-}
-
-// Harness origin marks: the letter is derived from the harness id
-// (zcode → Z, hermes → H, deepseek → D), so any future adapter gets a mark
-// with no map and no client edit. One identical mark on every surface — no
-// label variant; the full harness name lives in the tooltip and the legend.
-// Each mark also carries a per-harness accent color (letter, border, faint
-// tint) so harnesses are distinguishable at a glance: known ids get a
-// hand-picked hue, anything else a stable one hashed from the id.
-// Accepts a session object (uses its `harness` field), a bare harness id
-// (ticker entries), or null.
-const HARNESS_HUE = { "zcode": 212, "hermes": 26, "deepseek": 265 };
-function harnessHue(id) {
-  return HARNESS_HUE[id] ?? hashHue(id);
-}
-function harnessStyle(h) {
-  return markStyle(harnessHue(h));
-}
-function harnessMark(s) {
-  const h = typeof s === "string" ? s : (s?.harness ?? "");
-  if (!h) return "";
-  return `<span class="hmark" style="${harnessStyle(h)}" title="harness: ${esc(h)}">${esc(h.charAt(0).toUpperCase())}</span>`;
-}
+// AgenQ front-end shared visuals: number/time formatting and the sparkline
+// renderer. Loaded after marks.js, which carries the derived harness/role
+// marks and the escaping their markup needs; both files speak plain globals
+// (no bundler in this project by design).
 const CTX_LIMIT = 200_000; // fallback context cliff when a harness records no window
 
 const $ = (id) => document.getElementById(id);
@@ -105,10 +41,6 @@ function agoLong(ts) {
   if (h < 24) return h + " hour" + (h === 1 ? "" : "s") + " ago";
   const d = Math.floor(h / 24);
   return d + " day" + (d === 1 ? "" : "s") + " ago";
-}
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 // agent_failed → "Agent failed" — statuses are for the DB, people read prose
 function humanType(t) {
@@ -166,8 +98,3 @@ function drawSpark(canvas, series, cliff = CTX_LIMIT) {
   }
   ctx.textAlign = "left";
 }
-
-// The role derivation is pure (no DOM), so `bun test` pins its rules:
-// browser pages use the plain globals above, public/visuals.test.mjs imports
-// this file and reads the same functions off globalThis.
-globalThis.VISUALS = { roleMonogram, roleStyle, roleMark, hashHue };
