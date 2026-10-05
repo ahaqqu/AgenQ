@@ -47,7 +47,7 @@ Each entry of `sessions` is one session object:
 | `harness` | Harness id (`zcode`, `hermes`, `deepseek`). |
 | `title`, `project`, `directory` | Display title, project name (last path segment) and working directory. |
 | `parentId`, `parentSessionId`, `children` | Tree edges. `parentId` and `children` are namespaced like `id`; `parentSessionId` is the raw parent id recorded in the subagent's link metadata (zcode), left unnamespaced. `roots` at the top level holds the sessions whose parent is missing (or another harness's, or windowed out). |
-| `role` | Subagent profile name for dispatched subagents (from link metadata), `null` otherwise — the UI renders a manager session as "main" client-side. |
+| `role` | Subagent profile name for dispatched subagents (from link metadata), `null` otherwise — the UI renders a role-less session as "main" client-side. The value is passed through verbatim: the board derives each role's badge from the role's own name (its initials in a hue of its own) instead of holding a role list, so a project can rename, add or retire profiles with no client change. |
 | `model`, `thinking` | Model id and thinking level of the session's most recent request. |
 | `status` | `running`, `sleep`, `done`, `failed`, `exited`, `idle`. |
 | `live` | `true`/`false` when liveness was observed from the OS process table, `null` when the harness has no process signal. |

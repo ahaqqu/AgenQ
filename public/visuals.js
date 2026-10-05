@@ -1,41 +1,7 @@
-// AgenQ front-end shared visuals: formatting helpers and the sparkline
-// renderer. Loaded before app.js; both files speak plain globals (no
-// bundler in this project by design).
-const ROLE_EMOJI = {
-  "manager": "🧑‍✈️",
-  "senior-implementer": "🧠",
-  "implementer": "⚡",
-  "test-implementer": "🧪",
-  "reviewer": "🔍",
-  "thermo-nuclear-review-subagent": "🔥",
-  "thermo-nuclear-code-quality-review-subagent": "🧹",
-  "assistant-manager": "🔎",
-};
-// Harness origin marks: the letter is derived from the harness id
-// (zcode → Z, hermes → H, deepseek → D), so any future adapter gets a mark
-// with no map and no client edit. One identical mark on every surface — no
-// label variant; the full harness name lives in the tooltip and the legend.
-// Each mark also carries a per-harness accent color (letter, border, faint
-// tint) so harnesses are distinguishable at a glance: known ids get a
-// hand-picked hue, anything else a stable one hashed from the id.
-// Accepts a session object (uses its `harness` field), a bare harness id
-// (ticker entries), or null.
-const HARNESS_HUE = { "zcode": 212, "hermes": 26, "deepseek": 265 };
-function harnessHue(id) {
-  if (HARNESS_HUE[id] != null) return HARNESS_HUE[id];
-  let x = 0;
-  for (let i = 0; i < id.length; i++) x = (x * 31 + id.charCodeAt(i)) % 360;
-  return x;
-}
-function harnessStyle(h) {
-  const hue = harnessHue(h);
-  return `color:hsl(${hue} 85% 74%);border-color:hsl(${hue} 55% 46%);background:hsl(${hue} 75% 60% / .14)`;
-}
-function harnessMark(s) {
-  const h = typeof s === "string" ? s : (s?.harness ?? "");
-  if (!h) return "";
-  return `<span class="hmark" style="${harnessStyle(h)}" title="harness: ${esc(h)}">${esc(h.charAt(0).toUpperCase())}</span>`;
-}
+// AgenQ front-end shared visuals: number/time formatting and the sparkline
+// renderer. Loaded after marks.js, which carries the derived harness/role
+// marks and the escaping their markup needs; both files speak plain globals
+// (no bundler in this project by design).
 const CTX_LIMIT = 200_000; // fallback context cliff when a harness records no window
 
 const $ = (id) => document.getElementById(id);
@@ -75,10 +41,6 @@ function agoLong(ts) {
   if (h < 24) return h + " hour" + (h === 1 ? "" : "s") + " ago";
   const d = Math.floor(h / 24);
   return d + " day" + (d === 1 ? "" : "s") + " ago";
-}
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 // agent_failed → "Agent failed" — statuses are for the DB, people read prose
 function humanType(t) {

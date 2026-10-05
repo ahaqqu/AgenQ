@@ -13,10 +13,6 @@ if (!id) {
   log.innerHTML = "";
 }
 
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
 function when(ts) {
   return new Date(ts).toLocaleTimeString();
 }

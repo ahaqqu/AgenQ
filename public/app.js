@@ -1,12 +1,13 @@
 // AgenQ front end — polls /api/state, diffs snapshots, renders the board.
-// Dependency-free on purpose; visuals.js and detail.js carry the sparkline
-// renderer and the lazy detail panel. The fun layer is yours to restyle.
+// Dependency-free on purpose; marks.js carries the derived harness/role marks
+// (and the escaping their markup needs), visuals.js the formatting and the
+// sparkline renderer, detail.js the lazy detail panel. The fun layer is yours.
 
 const byLast = (a, b) => (b.lastAt ?? b.firstAt ?? 0) - (a.lastAt ?? a.firstAt ?? 0);
 
 // tight rows (Active Now chips, ticker, alert) have no room for long names:
 // projects become acronyms (agentic-project-template → APT, worktree suffix
-// kept: -wt95). The role emoji carries the role; tree cards keep the full
+// kept: -wt95). The role badge carries the role; tree cards keep the full
 // names and tooltips always carry the full text.
 const shortProject = (p) => {
   if (!p || p.length <= 10) return p ?? "";
@@ -75,7 +76,6 @@ function labelHtml(s) {
 // mcp__server__tool → mcp:server:tool — same meaning, less ticker noise
 const prettyTool = (t) => String(t ?? "").replace(/^mcp__/, "mcp:").replace(/__/g, ":");
 
-const roleIcon = (s) => (s.role ? (ROLE_EMOJI[s.role] ?? "🤖") : "🧑‍✈️");
 // threshold colors shared by the chip right side and the card headers:
 // green = comfortable, amber = getting close, red = critical
 const chCls = (ch) => ch >= 0.9 ? "st-good" : ch >= 0.7 ? "st-warn" : "st-hot";
@@ -117,6 +117,8 @@ let harnessById = new Map(); // harness id -> { id, label, emoji, hasStop }
 let flashId = null; // banner click → highlight this card until flashUntil
 let flashUntil = 0;
 const stoppedDirs = new Set(); // projects the user stopped this page-load
+const KID_CAP = 6; // subagent cards shown per run before the "show all" toggle
+const expandedRoots = new Set(); // runs the user expanded past KID_CAP
 let frozen = false; // live-pill click: pause re-renders — read the board or screenshot it
 
 // showHarness: only for cards outside a marked section (the "other
@@ -155,6 +157,19 @@ function treeHead(root, kids) {
     <span class="meta">${ch != null ? `ch <span class="st ${chCls(ch)}">${(ch * 100).toFixed(2)}%</span> · ` : ""}in <b>${fmt(sumIn)}</b> · out <b>${fmt(sum((s) => s.outputTokens))}</b> · reqs <b>${fmt(sum((s) => s.requests))}</b> · ${kids.length} spawned${running ? ` · ${running} running` : ""}${runDur ? ` · live ${runDur}` : ""} · active ${ago(lastAt)}</span>`;
 }
 
+// the cap's toggle: names how many of a run's subagents it is hiding and how
+// many of those are running, and folds the run back once expanded. Empty for
+// a run at or under the cap — the only case that has nothing to reveal.
+function moreToggleHtml(rootId, total, hiddenKids, expanded) {
+  if (total <= KID_CAP) return "";
+  const running = hiddenKids.filter((k) => k.status === "running").length;
+  return `<div class="kidmore"><button class="morebtn" data-root="${esc(rootId)}" title="${
+    expanded ? `collapse this run back to its ${KID_CAP} most recent subagents`
+             : `show all ${total} subagents of this run`}">${
+    expanded ? `▴ show fewer — back to the ${KID_CAP} most recent of ${total}`
+             : `▾ show all ${total} subagents — ${hiddenKids.length} more${running ? `, ${running} running` : ""}`}</button></div>`;
+}
+
 function agentCard(s, showHarness = true) {
   // main sessions render through the same card as subagents; project,
   // harness mark and title live in the tree header above, so the card
@@ -173,7 +188,7 @@ function agentCard(s, showHarness = true) {
     <div class="row">
       <span class="status ${esc(dot)}" title="${esc(s.status)}${s.live === false ? " · process exited" : ""}"></span>
       ${harnessBadge}
-      <span>${roleIcon(s)}</span>
+      <span>${roleMark(s)}</span>
       <span class="name${isMain ? " mainname" : ""}">${esc(name)}</span>
       <span class="model">${esc(modelHtml)}</span>
       <button class="convbtn" data-conv="${esc(s.id)}" title="open the live conversation in a new tab">💬</button>
@@ -236,13 +251,26 @@ function onStopClick(e) {
   return true;
 }
 
-// click a failed task or a ticker row → jump to the card below and flash it
+// click a failed task or a ticker row → jump to the card below and flash it.
+// The ticker and the FAILED panel list sessions the tree may not be showing —
+// a run's capped-away subagents, or a project the filter excludes — so the
+// jump makes the card reachable first (open the run, lift the filter), or it
+// would silently land on nothing.
 function jumpToCard(id) {
   if (!id) return;
+  let el = document.getElementById("root-" + id)
+    ?? document.getElementById("kid-" + id);
+  if (!el && prev) {
+    const s = prev.sessions.find((x) => x.id === id);
+    if (!s) return;
+    if (filterProject !== "all" && s.project !== filterProject) filterProject = "all";
+    if (s.parentId && prev.roots.includes(s.parentId)) expandedRoots.add(s.parentId);
+    render(prev, true);
+    el = document.getElementById("root-" + id)
+      ?? document.getElementById("kid-" + id);
+  }
   flashId = id;
   flashUntil = Date.now() + 1800;
-  const el = document.getElementById("root-" + id)
-    ?? document.getElementById("kid-" + id);
   if (!el) return;
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.remove("flash");
@@ -260,6 +288,18 @@ $("alert").addEventListener("click", (e) => {
 $("ticker").addEventListener("click", (e) => {
   const li = e.target.closest("li[data-target]");
   if (li) jumpToCard(li.dataset.target);
+});
+
+// subagent cap: the toggle shows the rest of a run's cards (or folds them
+// back). The state lives in expandedRoots, so the next poll keeps it; the
+// render is forced, so a click that follows a text selection still lands.
+$("tree").addEventListener("click", (e) => {
+  const btn = e.target.closest(".morebtn");
+  if (!btn) return;
+  const id = btn.dataset.root;
+  if (expandedRoots.has(id)) expandedRoots.delete(id);
+  else expandedRoots.add(id);
+  if (prev) render(prev, true);
 });
 
 $("filter").addEventListener("change", () => {
@@ -315,14 +355,29 @@ $("legend").innerHTML = `
   </div>
   <div class="lgroup">
     <div class="lhead">ICONS</div>
-    <div class="lrow"><span class="ic">🧑‍✈️</span> main session (the manager you talked to)</div>
-    ${Object.entries(ROLE_EMOJI).map(([r, e]) => `<div class="lrow"><span class="ic">${e}</span> ${esc(r)}</div>`).join("")}
-    <div class="lrow"><span class="ic">🤖</span> other subagent role</div>
+    <div class="lrow"><span class="ic">🧑‍✈️</span> main session (the one you talked to)</div>
+    <div id="legend-roles"></div>
     <div class="lrow"><span class="ic">💤</span> idle 5m+ but process still alive</div>
     <div class="lrow"><span class="ic">⚠</span> last error of that agent</div>
     <div class="lrow"><span class="ic hmark" style="${harnessStyle("zcode")}">Z</span> harness mark — every row shows which harness runs the agent (<span id="legend-harnesses"></span>)</div>
     <div class="lrow"><span class="ic">⏹</span> kill process — stops every live process of that project run (the whole run stops)</div>
   </div>`;
+
+// the legend's role list is the roles actually on the board — never a fixed
+// list — so it cannot go stale when a project renames, adds or retires one.
+// Each row doubles as the decoder for the monograms on the cards: the badge
+// next to a role is derived from that role's own name (initials + a hue).
+function renderLegendRoles(roles) {
+  const box = $("legend-roles");
+  if (!box) return;
+  const html =
+    `<div class="lhead">SUBAGENT ROLES — badge = the role's own initials, a hue of its own</div>` +
+    (roles.length
+      ? roles.map((r) => `<div class="lrow"><span class="ic">${roleMark(r)}</span> ${esc(r)}</div>`).join("")
+      : `<div class="lrow"><span class="ic"></span> no subagent role in this window</div>`);
+  // only on change: a constant swap eats the tooltip under the cursor
+  if (box.innerHTML !== html) box.innerHTML = html;
+}
 
 // the legend's harness list comes from the mounted adapters, not from a
 // hardcoded string — it can't drift when a harness is added or renamed
@@ -362,15 +417,26 @@ $("warnbar").addEventListener("click", () => {
   if (prev) renderWarnings(prev);
 });
 
-function render(state) {
+// force: a user-initiated render (the cap toggle, a card jump) must land even
+// while a selection is held — the guard exists to protect a *timer* re-render,
+// not to swallow a click the user just made
+function render(state, force = false) {
   // copying something? defer the re-render until the selection is gone —
   // swapping innerHTML on a 1.5s timer yanks text out from under the cursor
-  const selection = document.getSelection();
-  if (selection && !selection.isCollapsed) return;
+  if (!force) {
+    const selection = document.getSelection();
+    if (selection && !selection.isCollapsed) return;
+  }
   const byId = new Map(state.sessions.map((s) => [s.id, s]));
   computeInstances(state.sessions);
   harnessById = new Map((state.harnesses ?? []).map((h) => [h.id, h]));
   renderLegendHarnesses(state.harnesses);
+  // the legend is board vocabulary, so it lists every role in the snapshot
+  // (not just the filtered view's) — same policy as the harness list above
+  renderLegendRoles(
+    [...new Set(state.sessions.map((s) => s.role).filter(Boolean))]
+      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())),
+  );
   renderWarnings(state);
 
   // project filter dropdown
@@ -434,7 +500,7 @@ function render(state) {
           const state = stoppedDirs.has(dir) ? "stopped by you" : s.live ? "" : "run exited";
           return `
           <div class="aentry ${s.live ? "" : "exited"}">
-            <span class="entry" data-target="${esc(s.id)}" title="${esc(fullLabel(s))}">${harnessMark(s)}<span class="ic">${roleIcon(s)}</span>${labelHtml(s)}</span>
+            <span class="entry" data-target="${esc(s.id)}" title="${esc(fullLabel(s))}">${harnessMark(s)}<span class="ic">${roleMark(s)}</span>${labelHtml(s)}</span>
             <span class="act">· ${esc(humanType(s.lastError?.type ?? "failed"))}</span>
             <span class="r">- ${esc(tagged([agoLong(s.lastAt), state].filter(Boolean).join(" · "), s))}</span>
           </div>`;
@@ -452,7 +518,7 @@ function render(state) {
     const open = expandedId === s.id;
     return `<div class="chip ${open ? "open" : ""}" data-session="${esc(s.id)}">` +
       `<button class="convbtn" data-conv="${esc(s.id)}" title="open the live conversation in a new tab">💬 live</button>` +
-      `<span class="status running"></span>${harnessMark(s)}<span>${roleIcon(s)}</span>` +
+      `<span class="status running"></span>${harnessMark(s)}<span>${roleMark(s)}</span>` +
       `<span class="l" title="${esc(fullLabel(s))}">${labelHtml(s)} <span class="act" title="${esc(doing)}">${esc(doing + st)}</span></span>` +
       `<span class="dash">-</span>` +
       `<span class="r">${instTag(s) ? esc(instTag(s)) + " · " : ""}${statsHtml(s)} · ${ago(s.lastAt)}</span></div>` +
@@ -461,25 +527,34 @@ function render(state) {
 
   // tree — ordered by time only (newest roots first, newest children
   // first): recency is the primary key; same-project sections end up
-  // adjacent on their own because they share activity windows
+  // adjacent on their own because they share activity windows. A run's
+  // subagent list is capped at KID_CAP cards (a run can dispatch 50+, and
+  // the board must stay scannable); the toggle reveals the rest, and the
+  // expanded set lives outside the DOM so the 1.5s re-render can't collapse
+  // a run the user opened.
   const seen = new Set();
   const sections = [];
   const rootNodes = state.roots.map((rid) => byId.get(rid)).filter(Boolean).sort(byLast);
   for (const root of rootNodes) {
-    if (!root) continue;
     if (!matches(root)) continue;
     seen.add(root.id);
     const kids = (root.children ?? []).map((c) => byId.get(c)).filter(Boolean).sort(byLast);
     kids.forEach((k) => seen.add(k.id));
+    const expanded = expandedRoots.has(root.id);
+    const shownKids = expanded ? kids : kids.slice(0, KID_CAP);
+    const more = moreToggleHtml(root.id, kids.length, kids.slice(shownKids.length), expanded);
     sections.push(`
       <div class="root" id="root-${esc(root.id)}">
         <div class="head">${treeHead(root, kids)}</div>
         <div class="treegrid">
           <div class="maincol">${agentCard(root, false)}</div>
-          <div class="kids">${kids.map((s) => agentCard(s, false)).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}</div>
+          <div class="kids">${shownKids.map((s) => agentCard(s, false)).join("") || `<div class="desc" style="padding:6px 4px">no dispatched subagents</div>`}${more}</div>
         </div>
       </div>`);
   }
+  // keep the expanded set bounded: forget runs that left the window, so a
+  // long-lived tab cannot accumulate ids (a returning run starts collapsed)
+  for (const id of expandedRoots) if (!byId.has(id)) expandedRoots.delete(id);
   const orphans = state.sessions.filter((s) => !seen.has(s.id) && matches(s)).sort(byLast);
   if (orphans.length)
     sections.push(`<div class="root"><div class="head"><span class="title">other sessions</span></div><div class="kids">${orphans.map((s) => agentCard(s, true)).join("")}</div></div>`);
@@ -546,7 +621,7 @@ function render(state) {
         (t.status ? ` · ${t.status}` : "") +
         (t.outputBytes != null ? ` · ${fmt(t.outputBytes)}B` : "");
       const err = t.status && t.status !== "completed" && t.status !== "running" && t.status !== "pending";
-      l = (agent ? harnessMark(agent) + " " + roleIcon(agent) + " " + labelHtml(agent) : harnessMark(t.harness ?? t.sessionId) + " session") +
+      l = (agent ? harnessMark(agent) + " " + roleMark(agent) + " " + labelHtml(agent) : harnessMark(t.harness ?? t.sessionId) + " session") +
         ` <span class="act ${err ? "errmark" : "okmark"}">⚡ ${esc(prettyTool(t.tool))} ${t.status ?? ""}</span>`;
       r = [t.outputBytes != null ? `${fmt(t.outputBytes)}B` : "", ago(t.at)].filter(Boolean).join(" · ");
       if (wide) {
@@ -558,7 +633,7 @@ function render(state) {
     if (f.kind === "error") {
       const s = f.s;
       tip = fullLabel(s) + ` — ${humanType(s.lastError.type)}: ${s.lastError.message ?? ""}`;
-      l = harnessMark(s) + " " + roleIcon(s) + " " + labelHtml(s) +
+      l = harnessMark(s) + " " + roleMark(s) + " " + labelHtml(s) +
         ` <span class="act errmark">⚠ ${esc(humanType(s.lastError.type))}</span>`;
       r = ago(f.at);
       if (wide) {
@@ -568,7 +643,7 @@ function render(state) {
     }
     const s = f.s;
     tip = fullLabel(s) + ` — session started ${new Date(f.at).toLocaleString()}, now ${s.status}`;
-    l = harnessMark(s) + " " + roleIcon(s) + " " + labelHtml(s) +
+    l = harnessMark(s) + " " + roleMark(s) + " " + labelHtml(s) +
       ` <span class="act okmark">▶ started · ${esc(s.status)}</span>`;
     r = ago(f.at);
     if (wide) {
