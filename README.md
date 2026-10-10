@@ -1,6 +1,6 @@
 # AgenQ
 
-Live mission-control monitor for AI coding-agent harnesses — ZCode, [Hermes](https://github.com/NousResearch/hermes-agent) and [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) today, any telemetry-leaving tool next — so every subagent a run dispatches is easy to monitor at a glance. 🚀
+Live mission-control monitor for AI coding-agent harnesses — ZCode, [Hermes](https://github.com/NousResearch/hermes-agent) and [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) and MiMo Desktop (MiMoCode) today, any telemetry-leaving tool next — so every subagent a run dispatches is easy to monitor at a glance. 🚀
 
 AgenQ reads (read-only) the telemetry harnesses already write on disk and turns it into a live board:
 
@@ -45,6 +45,7 @@ Everything else — server flags, manual setups, and the one write AgenQ can per
 
 AgenQ is harness-agnostic: a per-harness adapter reads the telemetry a harness already writes on disk, and every harness merges into one board (see the [adapter contract](harness/README.md)).
 
+- **MiMo Desktop** — the trajectory SQLite DB at `~/.local/share/mimocode/mimocode.db` (Windows installs via `/mnt/c/Users/<user>/.local/share/mimocode/mimocode.db` when AgenQ runs in WSL).
 - **ZCode** — the SQLite DB at `~/.zcode/cli/db/db.sqlite` plus its per-session agents directory.
 - **Hermes** — the SQLite DB at `~/.hermes/state.db`.
 - **DeepSeek Harness** — the session event logs under `~/.dsh/sessions/`, plus `~/.dsh/storages/workspace.json` and each session's kernel lock.
