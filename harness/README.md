@@ -2,7 +2,7 @@
 
 AgenQ is harness-agnostic: any tool that runs AI coding sessions and leaves
 telemetry on disk can appear on the board. A **harness adapter** teaches the
-monitor how one such tool — ZCode, Hermes and DeepSeek Harness today — exposes:
+monitor how one such tool — ZCode, Hermes, DeepSeek Harness and MiMo Desktop today — exposes:
 
 1. a **state snapshot**: every session, its tokens, status, todos, errors and
    its place in the manager→subagent tree (poll, ~1.5s cadence),

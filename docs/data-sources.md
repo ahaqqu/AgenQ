@@ -1,12 +1,11 @@
 # Data sources — every file AgenQ reads
 
 AgenQ is harness-agnostic: any tool that runs AI coding sessions can appear on
-the board by mounting a **harness adapter**. ZCode, Hermes and DeepSeek Harness
-ship adapters; others plug in the same way — see
+the board by mounting a **harness adapter**. ZCode, Hermes, DeepSeek Harness and MiMo Desktop ship adapters; others plug in the same way — see
 [`harness/README.md`](../harness/README.md) for the adapter contract.
 
 The registry namespaces every session id by harness (`zcode:sess_…`,
-`hermes:2026…`, `deepseek:session-…`), merges all harnesses into one board, and
+`hermes:2026…`, `mimocode:ses_…`, `deepseek:session-…`), merges all harnesses into one board, and
 routes the lazy per-session endpoints to the harness that owns the id. Every
 board item carries a harness origin mark (boxed first letter of the harness id
 in a per-harness accent color — a blue Z, an orange H, a violet D; unknown
@@ -64,6 +63,30 @@ board warning) rather than folding it under the wrong vocabulary; if a
 committed frame is damaged, it drops that frame, keeps every event after it and
 reports the damage in `warnings` — one bad frame never silences the rest of a
 session.
+
+
+## MiMo Desktop (MiMoCode)
+
+| Source | Used for |
+|---|---|
+| `~/.local/share/mimocode/mimocode.db` (`session`, `message`, `part`, `actor_registry`, `todo`, `project`) | session titles and project directories, per-request token sparklines and totals (assistant `message.data.tokens` + matching `step-finish` parts), the manager to actor subagent tree, todo lists, the tool trail |
+| the same DB — `part` and `message` one session at a time, lazily per click/poll | the detail panel (current tool with arguments, latest thinking, per-call usage rows) and the live conversation (user/assistant text, collapsed thinking, tool chips with their final status) |
+
+MiMo Desktop's embedded MiMoCode engine writes a single trajectory SQLite DB.
+On Linux/macOS it lives at `~/.local/share/mimocode/mimocode.db`. When AgenQ
+runs in **WSL** against a Windows install, the same file is under
+`/mnt/c/Users/<user>/.local/share/mimocode/mimocode.db`; the adapter
+auto-discovers `/mnt/*/Users/*/` candidates and can be pinned with
+`--mimocode-db` or `MIMOCODE_DB`. Because SQLite WAL over a `/mnt` 9p mount
+routinely raises disk I/O errors, the adapter stages `mimocode.db` + `-wal` +
+`-shm` into a local cache (`--mimocode-cache`, default `/tmp/agenq-mimocode`)
+and opens that copy read-only each poll.
+
+Token wire shape on assistant messages (Anthropic-style): `{ input, output,
+reasoning, cache: { read, write } }` where `input` **excludes** cache reads.
+The board reports `inputTokens = input + cache.read` so cache-hit% stays
+comparable with the other harnesses (see `harness/mimocode/tokens.mjs`).
+Archived sessions (`session.time_archived`) are excluded, matching the board.
 
 ## Scope
 

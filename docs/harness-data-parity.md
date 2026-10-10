@@ -119,3 +119,19 @@ accidental.
 - **All three: anything that would require writing to the harness's telemetry** —
   AgenQ is read-only (`mode=ro`, fresh connection per poll, read-only file
   reads) by architecture.
+
+## MiMo Desktop (MiMoCode)
+
+| Board slot | Source | Notes |
+|---|---|---|
+| Token totals (in/out/cache) | per-assistant-message `data.tokens` summed | wire `input` excludes cache reads; adapter reports `inputTokens = input + cache.read` (DSH parity) |
+| Sparkline (tokens/request) | exact per-request prompt (`input + cache.read`) | **parity with zcode** |
+| Context used (maxContext) | exact: biggest single-request prompt | **parity with zcode** |
+| Context window | not recorded — 200k fallback via `modelWindow()` | optional `contextWindow` if a future engine build records it |
+| Request count | count of assistant messages carrying `tokens` | **parity** |
+| Done vs failed | `actor_registry.status` / message `finish` | `stop`/`tool-calls`/`length` are clean; other finishes mark failure |
+| Tool ticker | `part` rows with `type: "tool"` | status from `state.status`, bytes from `state.output` |
+| Subagent tree | `actor_registry.parent_actor_id` | non-main actors become child cards `sessionId/actorId` |
+| Thinking tokens | `tokens.reasoning` | rolled into detail turn rows; card stats can surface `reasoningTokens` |
+| Cost | `message.data.cost` | often 0 on local/desktop providers |
+

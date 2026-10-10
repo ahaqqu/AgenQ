@@ -11,13 +11,19 @@ bun monitor.mjs --port 8765 --window-hours 12 \
   --db ~/.zcode/cli/db/db.sqlite \
   --agents-dir ~/.zcode/cli/agents \
   --hermes-db ~/.hermes/state.db \
-  --deepseek-dir ~/.dsh
+  --deepseek-dir ~/.dsh \
+  --mimocode-db ~/.local/share/mimocode/mimocode.db
 ```
 
 Server-owned flags are `--port`/`--window-hours`; each harness's paths are
 defined in its own `harness/<id>/config.mjs` and parsed from the same command
 line. `--deepseek-dir` defaults to `$DSH_HOME` when the harness sets it,
-otherwise `~/.dsh`.
+otherwise `~/.dsh`. `--mimocode-db` (or `MIMOCODE_DB`) points at MiMo Desktop /
+MiMoCode's trajectory DB — the adapter also auto-discovers
+`~/.local/share/mimocode/mimocode.db` and `/mnt/*/Users/*/…` (WSL). When that
+path sits on a `/mnt` Windows mount, each poll stages `mimocode.db` + WAL into
+`--mimocode-cache` (default `/tmp/agenq-mimocode`) so SQLite does not hit the
+9p WAL I/O error.
 
 ## Install variants
 
@@ -29,6 +35,21 @@ otherwise `~/.dsh`.
   ```bash
   ln -s "$(pwd)/monitor.mjs" ~/.local/bin/agenq
   ```
+
+## WSL + MiMo Desktop (Windows)
+
+AgenQ is Linux-first. To monitor a **Windows MiMo Desktop** install from WSL:
+
+```bash
+# from a checkout (or after copying this repo into WSL)
+./install.sh --port 8765 \
+  --mimocode-db /mnt/c/Users/<you>/.local/share/mimocode/mimocode.db
+```
+
+If `monitor.mjs` was copied from a Windows checkout, strip CRLF first (or the
+`#!/usr/bin/env bun` shebang breaks): `sed -i 's/\r$//' monitor.mjs`.
+The adapter copies the live DB into a local cache each poll, so a WAL database
+on `/mnt/c` reads cleanly.
 
 ## Read-only, with one exception
 
