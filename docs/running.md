@@ -12,7 +12,8 @@ bun monitor.mjs --port 8765 --window-hours 12 \
   --agents-dir ~/.zcode/cli/agents \
   --hermes-db ~/.hermes/state.db \
   --deepseek-dir ~/.dsh \
-  --mimocode-db ~/.local/share/mimocode/mimocode.db
+  --mimocode-db ~/.local/share/mimocode/mimocode.db \
+  --opencode-db ~/.local/share/opencode/opencode.db
 ```
 
 Server-owned flags are `--port`/`--window-hours`; each harness's paths are
@@ -25,6 +26,16 @@ path sits on a `/mnt` Windows mount, each poll stages `mimocode.db` + WAL into
 `--mimocode-cache` (default `/tmp/agenq-mimocode`) so SQLite does not hit the
 9p WAL I/O error.
 
+`--opencode-db` (or `OPENCODE_DB`, comma-separated for more than one) points
+at OpenCode's `opencode.db`. Unlike the MiMo flag it does not stop at the
+first hit: discovery finds `~/.local/share/opencode/opencode.db`,
+`$XDG_DATA_HOME/opencode/opencode.db`, every `/mnt/*/Users/*/…` Windows
+profile and `%USERPROFILE%\.local\share\opencode\opencode.db`, and **all** of
+them mount — a native and a Windows install share one board. A `/mnt` source
+is staged into `--opencode-cache` (default `/tmp/agenq-opencode`); see
+[data-sources.md](data-sources.md) for why that copy is incremental rather
+than a full copy per poll.
+
 ## Install variants
 
 - `./install.sh --port 8791 --window-hours 48` — flags pass straight through to the server.
@@ -36,20 +47,25 @@ path sits on a `/mnt` Windows mount, each poll stages `mimocode.db` + WAL into
   ln -s "$(pwd)/monitor.mjs" ~/.local/bin/agenq
   ```
 
-## WSL + MiMo Desktop (Windows)
+## WSL + Windows installs (MiMo Desktop, OpenCode)
 
-AgenQ is Linux-first. To monitor a **Windows MiMo Desktop** install from WSL:
+AgenQ is Linux-first. To monitor a **Windows** install of MiMo Desktop or
+OpenCode from WSL:
 
 ```bash
 # from a checkout (or after copying this repo into WSL)
 ./install.sh --port 8765 \
   --mimocode-db /mnt/c/Users/<you>/.local/share/mimocode/mimocode.db
+# OpenCode needs no flag — /mnt/*/Users/* is discovered on its own
+./install.sh --port 8765
 ```
 
 If `monitor.mjs` was copied from a Windows checkout, strip CRLF first (or the
 `#!/usr/bin/env bun` shebang breaks): `sed -i 's/\r$//' monitor.mjs`.
-The adapter copies the live DB into a local cache each poll, so a WAL database
-on `/mnt/c` reads cleanly.
+Both adapters copy the live DB into a local cache before reading it, so a WAL
+database on `/mnt/c` reads cleanly. OpenCode's copy is incremental (refresh
+the `-wal` only; a whole generation only when opencode checkpoints), because
+a 200 MB full copy on every 1.5s poll is not affordable.
 
 ## Read-only, with one exception
 
