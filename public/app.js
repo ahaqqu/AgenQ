@@ -85,15 +85,13 @@ const reqCls = (n) => n > 200 ? "st-hot" : n >= 100 ? "st-warn" : "st-good";
 
 // one stats grammar everywhere: "ch 99.99% · in 12.46M · out 73.2k ·
 // 133 reqs · ctx 148.4k". ch = cache hit: zcode's input_tokens already
-// includes the cached part, so it's cache-read / input. ctx is measured
-// against the session's own context window when its harness reports one,
-// and against the 200k cliff otherwise.
+// includes the cached part, so it's cache-read / input. ctx is the biggest
+// single-request prompt, read against the 200k cliff every card uses.
 function statsHtml(s) {
   const ch = (s.inputTokens ?? 0) > 0 ? (s.cacheRead ?? 0) / s.inputTokens : null;
-  const win = ctxWindow(s);
   return (ch != null ? `ch <span class="st ${chCls(ch)}">${(ch * 100).toFixed(2)}%</span> · ` : "") +
     `in <b>${fmt(s.inputTokens)}</b> · out <b>${fmt(s.outputTokens)}</b> · reqs <b class="st ${reqCls(s.requests)}">${s.requests}</b> · ` +
-    `ctx <b class="st ${ctxCls((s.maxContext ?? 0) / win)}">${fmt(s.maxContext)}</b>`;
+    `ctx <b class="st ${ctxCls((s.maxContext ?? 0) / CTX_LIMIT)}">${fmt(s.maxContext)}</b>`;
 }
 
 function currentActivity(s) {
@@ -570,7 +568,7 @@ function render(state, force = false) {
 
   for (const s of state.sessions) {
     const c = document.getElementById("spark-" + s.id);
-    if (c) drawSpark(c, s.sparkline, ctxWindow(s));
+    if (c) drawSpark(c, s.sparkline);
   }
 
   // recent-activity feed: tool calls + session errors + session starts,

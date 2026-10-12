@@ -4,7 +4,7 @@
 // subscribes the session so its normalized records are kept in memory.
 import { cfg } from "./config.mjs";
 import { findLogPath, readAggregate, recordsOf, resubscribe, subscribe } from "./log.mjs";
-import { CONV_TAIL, head, modelWindow, parseCursor } from "../lib.mjs";
+import { CONV_TAIL, head, parseCursor } from "../lib.mjs";
 
 // ---------- per-session detail (lazy — only read when the UI expands a row) ----------
 
@@ -37,9 +37,6 @@ export function sessionDetail(id) {
       cacheCreate: agg.cacheCreate,
       maxContext: agg.maxContext,
     },
-    // DSH records the model's real context window per request; the static
-    // table is only a fallback for logs that predate that event
-    modelWindow: agg.contextWindow ?? modelWindow(agg.model?.model),
     errors: agg.recentErrors.map((e) => ({ type: e.type, message: head(e.message, 200), at: e.at })),
     todos: agg.todos,
   };

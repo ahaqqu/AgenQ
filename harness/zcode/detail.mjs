@@ -2,7 +2,7 @@
 // breakdowns) and the live-conversation feed. Both open their own read-only
 // DB connection and are only hit when the UI asks for a specific session.
 import { cfg } from "./config.mjs";
-import { CONV_INPUT_CAP, CONV_TAIL, CONV_TEXT_CAP, CONV_THINK_CAP, head, modelWindow, parseCursor, roDb, rows, tail } from "../lib.mjs";
+import { CONV_INPUT_CAP, CONV_TAIL, CONV_TEXT_CAP, CONV_THINK_CAP, head, parseCursor, roDb, rows, tail } from "../lib.mjs";
 
 const CURSOR_PREFIX = "z";
 
@@ -85,7 +85,6 @@ export function sessionDetail(id) {
         cacheCreate: sums.cache_create ?? 0,
         maxContext: sums.max_context ?? 0,
       },
-      modelWindow: modelWindow(turns[0]?.model_id),
       errors: errors.map((e) => ({ type: e.error_type, message: head(e.error_message ?? "", 200), at: e.completed_at })),
       todos: todos.map((t) => ({ content: t.content, status: t.status })),
     };

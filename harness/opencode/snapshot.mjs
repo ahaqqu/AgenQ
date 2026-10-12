@@ -34,8 +34,7 @@ import { cfg, RECENT_LIMIT, WINDOW_MS } from "./config.mjs";
 import { openAll, closeAll, rows, jsonCol, projectFromDir, idChunks, placeholders } from "./db.mjs";
 import { usageFromSessionColumns, usageFromTokens } from "./tokens.mjs";
 import { toolEntry, toolParts } from "./parts.mjs";
-import { loadContextWindows, modelKey } from "./models.mjs";
-import { keepInWindow, modelWindow } from "../lib.mjs";
+import { keepInWindow } from "../lib.mjs";
 
 export const ACTIVE_MS = 5 * 60_000;
 const TICKER_LIMIT = 80;
@@ -184,7 +183,7 @@ function foldRecent(node, rowsNewestFirst, requests) {
   node.lastError = err && !err.cleared ? { type: err.type, message: err.message, at: err.at } : null;
 }
 
-function assemble(parts, now, windows) {
+function assemble(parts, now) {
   const nodes = new Map();
   const ensure = (id, base = {}) => {
     if (!nodes.has(id)) {
@@ -299,9 +298,6 @@ function assemble(parts, now, windows) {
     else if (awake) s.status = "running";
     else if (last) s.status = "sleep";
     else s.status = "idle";
-    // opencode's model catalog is the harness's own window; the static
-    // table is only what the catalog has never heard of
-    s.contextWindow = windows.get(modelKey(s.provider, s.model)) || modelWindow(s.model);
   }
 
   const byId = new Map([...nodes.values()].map((n) => [n.id, n]));
@@ -331,15 +327,11 @@ export async function snapshot({ now = Date.now() } = {}) {
     };
   }
   try {
-    const windows = new Map();
-    for (const { db } of dbs) {
-      for (const [k, v] of loadContextWindows(db, { now })) if (!windows.has(k)) windows.set(k, v);
-    }
     const parts = dbs.map(({ db }) => gatherOne(db, now));
     return {
       generatedAt: now,
       windowHours: cfg.windowHours,
-      ...assemble(parts, now, windows),
+      ...assemble(parts, now),
       warnings,
     };
   } finally {

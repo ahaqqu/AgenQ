@@ -2,14 +2,13 @@
 // renderer. Loaded after marks.js, which carries the derived harness/role
 // marks and the escaping their markup needs; both files speak plain globals
 // (no bundler in this project by design).
-const CTX_LIMIT = 200_000; // fallback context cliff when a harness records no window
+// The one context cliff every card and sparkline is drawn against. AgenQ
+// deliberately reads no per-model window from any harness: a 128k model and
+// a 1M model would otherwise put the same fill at opposite ends of the
+// gauge, and "past 200k, worry" is the rule the board was designed around.
+const CTX_LIMIT = 200_000;
 
 const $ = (id) => document.getElementById(id);
-
-// A harness that records the model's real context window fills
-// `session.contextWindow`; every other harness keeps the 200k cliff the
-// sparkline and the card's ctx gauge were designed around.
-const ctxWindow = (s) => (s?.contextWindow > 0 ? s.contextWindow : CTX_LIMIT);
 
 function fmt(n) {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
@@ -48,7 +47,7 @@ function humanType(t) {
   return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
 }
 
-function drawSpark(canvas, series, cliff = CTX_LIMIT) {
+function drawSpark(canvas, series) {
   const w = canvas.clientWidth || 300, h = canvas.clientHeight || 44;
   canvas.width = w * devicePixelRatio; canvas.height = h * devicePixelRatio;
   const ctx = canvas.getContext("2d");
@@ -61,9 +60,9 @@ function drawSpark(canvas, series, cliff = CTX_LIMIT) {
   ctx.beginPath();
   ctx.roundRect(0, 0, w, h, 4);
   ctx.fill();
-  // y-scale always spans the session's own cliff, so the line (and what's
+  // y-scale always spans the cliff, so the line (and what's
   // under vs. over it) is readable even on quiet sessions
-  const max = Math.max(...series, cliff);
+  const max = Math.max(...series, CTX_LIMIT);
   const step = w / (series.length - 1);
   const yOf = (v) => h - (v / max) * (h - 4) - 2;
   // area
@@ -81,12 +80,12 @@ function drawSpark(canvas, series, cliff = CTX_LIMIT) {
     const x = i * step, y = scaled[i];
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   });
-  ctx.strokeStyle = max > cliff ? "#e5534b" : "#6ea8fe";
+  ctx.strokeStyle = max > CTX_LIMIT ? "#e5534b" : "#6ea8fe";
   ctx.lineWidth = 1.5;
   ctx.stroke();
   // cliff marker + label, always drawn now that the scale reaches it
   {
-    const y = yOf(cliff);
+    const y = yOf(CTX_LIMIT);
     ctx.setLineDash([3, 3]);
     ctx.strokeStyle = "rgba(229,83,75,.5)";
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
@@ -94,7 +93,7 @@ function drawSpark(canvas, series, cliff = CTX_LIMIT) {
     ctx.fillStyle = "rgba(229,83,75,.8)";
     ctx.font = "9px ui-monospace, monospace";
     ctx.textAlign = "right";
-    ctx.fillText(fmt(cliff), w - 2, y - 2);
+    ctx.fillText(fmt(CTX_LIMIT), w - 2, y - 2);
   }
   ctx.textAlign = "left";
 }

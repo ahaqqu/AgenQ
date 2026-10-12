@@ -16,18 +16,16 @@ import {
   CONV_TEXT_CAP,
   CONV_THINK_CAP,
   head,
-  modelWindow,
   parseCursor,
   tail,
 } from "../lib.mjs";
 import { RECENT_LIMIT } from "./config.mjs";
 import { usageFromSessionColumns, usageFromTokens } from "./tokens.mjs";
-import { loadContextWindows, modelKey } from "./models.mjs";
 import { contentParts, partText, toolEntry, toolInput, toolParts } from "./parts.mjs";
 
 const TURNS_SHOWN = 40;
 const SESSION_COLS = `
-  title, directory, model,
+  title, directory,
   tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write,
   summary_additions, summary_deletions, summary_files`;
 
@@ -138,10 +136,6 @@ export function sessionDetail(id) {
       [id],
     );
     const totals = usageFromSessionColumns(row);
-    const modelJson = jsonCol(row.model, null);
-    const model = modelJson?.id ?? null;
-    const provider = modelJson?.providerID ?? null;
-    const contextWindow = loadContextWindows(db).get(modelKey(provider, model)) || modelWindow(model);
 
     return {
       sessionId: id,
@@ -165,7 +159,6 @@ export function sessionDetail(id) {
         requests: Number(reqs?.n) || 0,
         maxContext,
       },
-      modelWindow: contextWindow,
       errors,
       todos: todosFor(db, id),
     };

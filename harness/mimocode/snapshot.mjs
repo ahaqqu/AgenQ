@@ -11,7 +11,7 @@
 import { cfg, WINDOW_MS } from "./config.mjs";
 import { openDb, rows, jsonCol, projectFromDir } from "./db.mjs";
 import { usageFromTokens } from "./tokens.mjs";
-import { keepInWindow, modelWindow } from "../lib.mjs";
+import { keepInWindow } from "../lib.mjs";
 
 export const ACTIVE_MS = 5 * 60_000;
 const SPARK_TAIL = 120;
@@ -288,10 +288,6 @@ function assemble({ sessions, projects, usage, actors, todos, tools, now }) {
     else if (s.actorStatus === "running" || awake) s.status = "running";
     else if (last) s.status = "sleep";
     else s.status = "idle";
-    // context cliff fallback when the harness records no window
-    if (!s.contextWindow) {
-      s.contextWindow = modelWindow(s.model) || undefined;
-    }
   }
 
   // window keep + ancestors

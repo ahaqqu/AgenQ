@@ -9,7 +9,6 @@ import {
   CONV_TEXT_CAP,
   CONV_THINK_CAP,
   head,
-  modelWindow,
   parseCursor,
   roDb,
   rows,
@@ -26,7 +25,7 @@ export function sessionDetail(id) {
     const q = (sql, params = []) => {
       try { return rows(db, sql, params); } catch { return []; }
     };
-    const sess = q(`SELECT title, display_name, cwd, model
+    const sess = q(`SELECT title, display_name, cwd
                     FROM sessions WHERE id = ?`, [id])[0] ?? null;
 
     // the live/latest tool call: newest tool result row, with the
@@ -112,7 +111,6 @@ export function sessionDetail(id) {
       thinking,
       turns: [], // hermes reports per-task aggregates, not per-turn rows
       tokens: { ...sums, maxContext },
-      modelWindow: modelWindow(sess?.model),
       errors: errMsg
         ? [{ type: "handoff_failed", message: head(String(errMsg), 200), at: null }]
         : [],

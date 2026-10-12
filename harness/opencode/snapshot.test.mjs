@@ -4,7 +4,6 @@
 import { build, cleanup, now, dbPath, legacyPath, missingPath } from "./testenv.mjs";
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import adapter from "./index.mjs";
-import { resetCatalog } from "./models.mjs";
 import { resetStats } from "./stats.mjs";
 
 const MIN = 60_000;
@@ -12,7 +11,6 @@ const HOUR = 3_600_000;
 
 beforeAll(() => {
   build();
-  resetCatalog();
   resetStats();
 });
 
@@ -65,12 +63,11 @@ test("totals come from the session row, the sparkline from its messages", async 
   expect(a.directory).toBe("C:/Fun/Projects/demo");
 });
 
-test("context window comes from opencode's model catalog, not the fallback", async () => {
-  const snap = await adapter.snapshot(Date.now());
-  // catalog knows muse-spark: 1M
-  expect(byId(snap, "ses_aaa").contextWindow).toBe(1_048_576);
-  // a model the catalog has never heard of keeps the static fallback
-  expect(byId(snap, "ses_bbb").contextWindow).toBe(200_000);
+test("no row or detail payload reports a context window", async () => {
+  // the cliff every card draws against is the UI's 200k constant; an
+  // adapter reporting a model's real window would move it (PR #36 did)
+  expect(byId(await adapter.snapshot(Date.now()), "ses_aaa")).not.toHaveProperty("contextWindow");
+  expect(adapter.detail("ses_aaa")).not.toHaveProperty("modelWindow");
 });
 
 test("status is heartbeat recency, and a later success clears a failure", async () => {
@@ -127,7 +124,6 @@ test("detail fills every panel slot the payload defines", async () => {
     requests: 3,
     maxContext: 300,
   });
-  expect(d.modelWindow).toBe(1_048_576);
   expect(d.errors).toEqual([]);
   expect(d.todos).toHaveLength(2);
   expect(d.diff).toEqual({ additions: 12, deletions: 3, files: 4 });

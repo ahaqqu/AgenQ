@@ -95,7 +95,6 @@ Archived sessions (`session.time_archived`) are excluded, matching the board.
 | `~/.local/share/opencode/opencode.db` (`session_v2`, `project`) | session titles and project directories, the manager→subagent tree (`parent_id`), cumulative token totals (`tokens_*`), archived filter (`time_archived`), heartbeat (`time_updated`), the diff summary (`summary_*`) |
 | the same DB (`session_message`, `todo`) | per-request token sparklines and request counts, the run's standing error, todo lists, the tool trail |
 | the same DB — one session at a time, lazily per click/poll | the detail panel (current tool with arguments, latest thinking, newest turn rows, errors) and the live conversation (user/assistant text, collapsed thinking, tool chips with their final status) |
-| the same DB (`kv` → `models-dev:catalog`) | each model's real context window (`limit.context`), read once per 10 minutes |
 
 OpenCode keeps every session in one SQLite DB at
 `~/.local/share/opencode/opencode.db`. On Linux/macOS that path is read

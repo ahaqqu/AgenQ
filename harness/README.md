@@ -129,9 +129,12 @@ Additive per-row fields are allowed and the UI ignores ones it does not know.
 The DeepSeek adapter currently fills `live` (boolean: the harness's own write
 lease says a process holds the session — the UI dims a failed row whose run
 exited), `description` (the subagent's own descriptor label, shown as the
-card's task line), `contextWindow` (the model's real window, so that card's
-context gauge and sparkline cliff are measured against it) and `exitCode`
-inside `lastTool`.
+card's task line) and `exitCode` inside `lastTool`.
+
+An adapter reports no context window. Every card measures its fill and draws
+its sparkline cliff against the same 200k constant (`CTX_LIMIT` in
+`public/visuals.js`), so the gauge means the same thing on every row of the
+board.
 
 `warnings` is how an adapter degrades *part* of its data without taking its
 whole harness off the board: the registry prefixes each entry with the harness

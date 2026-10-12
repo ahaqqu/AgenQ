@@ -44,7 +44,6 @@ const SCHEMA = `
     time_created INTEGER, time_updated INTEGER
   );
   CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT, name TEXT);
-  CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT, time_created INTEGER, time_updated INTEGER);
 `;
 
 function session(db, s) {
@@ -83,27 +82,12 @@ function message(db, m) {
 }
 
 const MUSE = { id: "muse-spark-1.3-contributor-free", providerID: "opencode" };
-const UNKNOWN = { id: "some-model-the-catalog-has-never-heard-of", providerID: "opencode" };
+const UNKNOWN = { id: "some-other-model", providerID: "opencode" };
 
 export function build() {
   const db = new Database(dbPath);
   db.exec(SCHEMA);
   db.prepare(`INSERT INTO project VALUES (?, ?, ?)`).run("global", "/", null);
-
-  // the models.dev catalog opencode caches — the one place this harness
-  // records a real context window (1M for muse-spark)
-  db.prepare(`INSERT INTO kv VALUES (?, ?, ?, ?)`).run(
-    "models-dev:catalog",
-    JSON.stringify({
-      updatedAt: now,
-      digest: "test",
-      body: JSON.stringify({
-        opencode: { models: { [MUSE.id]: { limit: { context: 1_048_576, output: 131_072 } } } },
-      }),
-    }),
-    now,
-    now,
-  );
 
   // A — the root run, alive, with a tool call and a plan
   session(db, {
