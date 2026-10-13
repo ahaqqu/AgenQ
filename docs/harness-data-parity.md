@@ -36,7 +36,7 @@ Harness `~/.dsh/sessions/**/session[.vN].jsonl.zstd` + `/proc/locks`).
 | Token totals (in/out/cache) | summed per request row | cumulative on `sessions` + per-task rows | per-message `usage` summed | **parity of value, not of naming**: DSH's `inputTokens` excludes cache reads, so the adapter adds `cacheReadTokens` back to keep the board's "input includes the cached part" semantics (cache hit % stays comparable) |
 | Sparkline (tokens/request) | exact per-request `model_usage.input_tokens` | per-task averages (plateau points from `session_model_usage`) | exact per-request `assistant/message.usage` (prompt tokens incl. cache read) | **parity with zcode**; **inherent** for hermes, which stores per-task cumulative sums |
 | Context used (maxContext) | exact: `MAX(model_usage.input_tokens)` per request | per-call **average** `input/api_call_count` per task | exact: biggest single-request prompt | **parity with zcode**; hermes's average under-measures a spiky request |
-| Context window (the cliff a card measures against) | not recorded — the UI's 200k constant | derivable from `sessions.model` through the static table | exact: `request/context.contextWindow` (e.g. 1M) | **DSH is the first harness to fill the optional `contextWindow` row field**, so its card gauge and sparkline cliff use the model's real window; harnesses that don't report one keep the 200k constant |
+| Context window (the cliff a card measures against) | not recorded | not recorded | recorded per request (`request/context.contextWindow`, e.g. 1M) — **ignored** | **no adapter reports one, by design**: every card measures its fill and draws its sparkline cliff against the same 200k constant (`CTX_LIMIT` in `public/visuals.js`). A real per-model window would put the same fill at opposite ends of the gauge — a 128k model and a 1M model — so the harness may record it and AgenQ drops it |
 | Status running/sleep | `model_usage` recency + live `/proc` scan | `session_model_usage.last_seen` / `last_activity_at` recency | event recency, refined by the session's own write lease | **parity** (recency); differs in liveness, next row |
 | Liveness / exited | per-directory `/proc` scan of `zcode-cli` processes | not claimed — sessions live in shared gateway/daemon processes | `/proc/locks` matched against each session's `session.lock` inode: DSH holds a kernel `flock` for the life of its write handle and the kernel drops it on process death | **parity with zcode, exact per session**: the harness's own lease is read, not inferred. Still no stop surface (next row) |
 | Live duration (⏱ on cards, `live …` in run headers) | `MIN(started_at)` → `MAX(completed_at)` across request rows (+ agents-dir timestamps) | `sessions.started_at` → `last_activity_at` | header `createdAt` → last event time | **parity** — all three fill `firstAt`/`lastAt`; the span is computed client-side |
@@ -116,7 +116,7 @@ accidental.
   damaged frame inside an otherwise readable log is dropped the same way: the
   events after it are still folded, because one bad frame must not silence
   the rest of a session.
-- **All three: anything that would require writing to the harness's telemetry** —
+- **All adapters: anything that would require writing to the harness's telemetry** —
   AgenQ is read-only (`mode=ro`, fresh connection per poll, read-only file
   reads) by architecture.
 
@@ -127,11 +127,31 @@ accidental.
 | Token totals (in/out/cache) | per-assistant-message `data.tokens` summed | wire `input` excludes cache reads; adapter reports `inputTokens = input + cache.read` (DSH parity) |
 | Sparkline (tokens/request) | exact per-request prompt (`input + cache.read`) | **parity with zcode** |
 | Context used (maxContext) | exact: biggest single-request prompt | **parity with zcode** |
-| Context window | not recorded — 200k fallback via `modelWindow()` | optional `contextWindow` if a future engine build records it |
+| Context window | not recorded | no adapter reports one — the same 200k cliff as every other card |
 | Request count | count of assistant messages carrying `tokens` | **parity** |
 | Done vs failed | `actor_registry.status` / message `finish` | `stop`/`tool-calls`/`length` are clean; other finishes mark failure |
 | Tool ticker | `part` rows with `type: "tool"` | status from `state.status`, bytes from `state.output` |
 | Subagent tree | `actor_registry.parent_actor_id` | non-main actors become child cards `sessionId/actorId` |
 | Thinking tokens | `tokens.reasoning` | rolled into detail turn rows; card stats can surface `reasoningTokens` |
 | Cost | `message.data.cost` | often 0 on local/desktop providers |
+
+## OpenCode
+
+| Board slot | Source | Notes |
+|---|---|---|
+| Token totals (in/out/cache) | cumulative `session_v2.tokens_*` | wire `input` excludes cache reads; adapter reports `inputTokens = input + cache.read` (DSH parity). Totals come from the row, not from summing messages, so a card's numbers do not depend on how many rows one poll walked |
+| Sparkline (tokens/request) | exact per-request prompt (`input + cache.read`) of the newest 120 assistant rows | **parity with zcode in value**; reads are index-bounded — a full payload scan per poll cost half a second on a live session |
+| Context used (maxContext) | biggest single-request prompt **inside that same 120-row window** | **deliberate difference**: the gauge and the chart measure the same points, and after a compaction it reports the current fill rather than a peak the context no longer holds. An all-time peak would mean a full payload scan every poll |
+| Context window | not read — `kv` → `models-dev:catalog` → `models[<id>].limit.context` holds it (1M for muse-spark) | **deliberately dropped**: no adapter reports a window, so this card draws the same 200k cliff as every other |
+| Request count | index-only count of `type='assistant'` rows | **parity**; an in-flight turn counts as a request (rows carrying `tokens` differ by 0–1) |
+| Status running/sleep | `session_v2.time_updated` recency (5 min), same rule as the other adapters | **inherent**: opencode runs every session inside one process and records no per-session lease, pid or lock, so liveness can only be inferred |
+| Done vs failed | newest assistant `data.error` inside that window, cleared by any newer successful request | **inherent difference in granularity**: rate limits and provider timeouts are surfaced verbatim. `session_v2.idle_outcome` is deliberately *not* read — it records how an old idle turn ended, not the run's standing (a session carrying it was still alive and healthy) |
+| Tool ticker / last tool | tool blocks in `session_message.data.content` | status from `state.status` (`completed` → `ok`, `error` → `error`), bytes from `state.content` (string or list) falling back to `metadata.output`, exit code from `state.metadata.exit` |
+| Subagent tree | `session_v2.parent_id` + the `agent` column | roles are opencode's own agents (`explore`, `general`, `plan` …). A root carries no role and reads as "main"; the subagent's title becomes its task description |
+| Todos | `todo` table | written in the same event as the model's `todowrite` call — every session that ever called `todowrite` has rows here, so the table is the projection (measured: the table's last write follows the last `todowrite` by five seconds) |
+| Thinking | reasoning blocks carrying readable text | **inherent**: opencode also stores encrypted reasoning (`reasoningEncryptedContent`), which has no text to show |
+| Diff summary | `summary_additions` / `summary_deletions` / `summary_files` on the session row | fills the detail panel's diff slot (0 when the harness records none) |
+| Live conversation | `session_message` ordered by `seq`, cursor `s:<seq>` | **parity**; `system`, `idle`, `compaction` and `synthetic` rows are harness plumbing (instruction notices, shell echoes) and are not rendered as chat |
+| Stop action | none — `hasStop: false` | **inherent** (deliberate): one opencode process owns every session |
+| Pre-v2 data dirs | not read | a dir without `session_v2` is a different product version whose `session_message` table means something else; skipped whole rather than misread |
 

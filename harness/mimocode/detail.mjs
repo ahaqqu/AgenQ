@@ -8,7 +8,6 @@ import {
   CONV_TEXT_CAP,
   CONV_THINK_CAP,
   head,
-  modelWindow,
   parseCursor,
   tail,
 } from "../lib.mjs";
@@ -139,7 +138,6 @@ export function sessionDetail(id) {
     }
 
     const tokens = collectUsage(db, sessionId, actorId);
-    const model = turns.length ? turns[turns.length - 1].model_id : null;
 
     return {
       sessionId: id,
@@ -151,7 +149,6 @@ export function sessionDetail(id) {
       thinking,
       turns,
       tokens,
-      modelWindow: modelWindow(model),
       errors: [],
       todos: [],
     };

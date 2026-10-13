@@ -74,7 +74,7 @@ function detailHtml(entry) {  if (!entry || (!entry.data && !entry.error)) retur
       ` · ${d.diff.files ?? "?"} files</span></div>`);
 
   const tk = d.tokens ?? {};
-  const win = d.modelWindow || 200_000;
+  const win = CTX_LIMIT;
   const fill = tk.maxContext ? Math.round((tk.maxContext / win) * 100) : 0;
   out.push(`<div class="dsec"><span class="dlab">context</span><span class="dval">` +
     `<span class="bar"><span class="fill ${fill >= 90 ? "hot" : ""}" style="width:${Math.min(fill, 100)}%"></span></span>` +

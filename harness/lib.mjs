@@ -111,16 +111,6 @@ export function mergeUsage(usage, at, project, provider, model, counters) {
   return row;
 }
 
-// Context-window estimates for the fill gauge; unmatched models fall back to
-// the same 200k cliff the sparkline uses.
-const MODEL_WINDOWS = [
-  [/glm/i, 200_000],
-  [/kimi/i, 256_000],
-  [/deepseek/i, 128_000],
-];
-export const modelWindow = (model) =>
-  MODEL_WINDOWS.find(([re]) => re.test(model ?? ""))?.[1] ?? 200_000;
-
 // The two-pass keep rule shared by every adapter: keep sessions with a
 // heartbeat in the window, then any ancestor of a kept session (a parent
 // whose own row is windowed out still anchors its subtree). Inputs are the

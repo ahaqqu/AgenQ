@@ -156,7 +156,6 @@ UI expands a row. `:id` is a namespaced session id, URL-encoded.
   "turns": [ { "model_id": "…", "duration_ms": 1200, "input_tokens": 5000, "...": "…" } ],
   "tokens": { "requests": 10, "input": 50000, "output": 4000, "reasoning": 800,
               "cacheRead": 40000, "cacheCreate": 2000, "maxContext": 90000 },
-  "modelWindow": 200000,
   "errors": [ { "type": "rate_limit", "message": "…", "at": 1789238000000 } ],
   "todos": [ { "content": "write tests", "status": "done" } ]
 }
@@ -165,8 +164,9 @@ UI expands a row. `:id` is a namespaced session id, URL-encoded.
 The shape is a contract every harness fills as far as its telemetry allows —
 hermes reports no per-turn rows (`turns: []`), DeepSeek Harness keeps no diff
 summary (`diff: null`), and fields a harness cannot observe are `null`/empty
-rather than absent. `modelWindow` is the context-window estimate used by the
-fill gauge (the model's real window when recorded, 200k fallback otherwise).
+rather than absent. There is no context-window field: the fill gauge divides
+`maxContext` by the client's fixed 200k cliff, so the same number means the
+same thing in every panel.
 
 Returns 404 only when the harness is unknown or offers no detail; an
 unknown session under a mounted harness returns the empty shape with 200

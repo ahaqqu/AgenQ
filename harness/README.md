@@ -2,7 +2,7 @@
 
 AgenQ is harness-agnostic: any tool that runs AI coding sessions and leaves
 telemetry on disk can appear on the board. A **harness adapter** teaches the
-monitor how one such tool — ZCode, Hermes, DeepSeek Harness and MiMo Desktop today — exposes:
+monitor how one such tool — ZCode, Hermes, DeepSeek Harness, MiMo Desktop and OpenCode today — exposes:
 
 1. a **state snapshot**: every session, its tokens, status, todos, errors and
    its place in the manager→subagent tree (poll, ~1.5s cadence),
@@ -88,7 +88,7 @@ Usage rows are grouped by bucket × project × provider × model; the page
 buckets and rolls them up client-side (that is what makes a cross-harness "by
 provider" table meaningful). `mergeUsage()` and `usageKey()` in `../lib.mjs`
 are the shared implementation of that row identity — use them instead of
-hand-rolling the key, so the three adapters cannot drift on the wire shape.
+hand-rolling the key, so the adapters cannot drift on the wire shape.
 `sessions` are for the counters that cannot be bucket-attributed — agents
 (main sessions), ch (subagents) and summed duration — and are counted whole in
 any range their span intersects.
@@ -129,9 +129,12 @@ Additive per-row fields are allowed and the UI ignores ones it does not know.
 The DeepSeek adapter currently fills `live` (boolean: the harness's own write
 lease says a process holds the session — the UI dims a failed row whose run
 exited), `description` (the subagent's own descriptor label, shown as the
-card's task line), `contextWindow` (the model's real window, so that card's
-context gauge and sparkline cliff are measured against it) and `exitCode`
-inside `lastTool`.
+card's task line) and `exitCode` inside `lastTool`.
+
+An adapter reports no context window. Every card measures its fill and draws
+its sparkline cliff against the same 200k constant (`CTX_LIMIT` in
+`public/visuals.js`), so the gauge means the same thing on every row of the
+board.
 
 `warnings` is how an adapter degrades *part* of its data without taking its
 whole harness off the board: the registry prefixes each entry with the harness
@@ -190,7 +193,11 @@ SQLite nor small: an append-only Zstandard-framed event log per session. It
 splits into `frames.mjs` (the codec), `fold.mjs` (the event vocabulary → board
 aggregate, pure) and `log.mjs` (discovery + the incremental cache that reads
 each log once), with per-session liveness taken from the kernel's `flock`
-table rather than a process scan.
+table rather than a process scan. `harness/opencode/` is the reference for a
+harness with **more than one install on one machine** (every candidate mounts,
+not just the first) whose DB sits on a foreign filesystem — `stage.mjs` keeps a
+local copy that refreshes only the WAL, since SQLite WAL will not read over a
+`/mnt` mount.
 
 How much board data each harness can supply — and what is inherently vs only
 currently missing — is tracked in [docs/harness-data-parity.md](../docs/harness-data-parity.md).

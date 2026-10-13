@@ -138,9 +138,6 @@ function toSession({ id, agg, now, live, windowed = false }) {
     cacheRead: agg.cacheRead,
     cacheCreate: agg.cacheCreate,
     maxContext: agg.maxContext,
-    // the model's real window when the log recorded it — the card's context
-    // gauge and the sparkline cliff are measured against this, not a constant
-    contextWindow: agg.contextWindow ?? null,
     firstAt: agg.firstAt ?? h.createdAt ?? null,
     lastAt: agg.lastAt || (agg.firstAt ?? 0),
     sparkline: agg.sparkline,

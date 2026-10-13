@@ -20,7 +20,6 @@ export function newAgg(header = null) {
     title: null,
     model: null, // { provider, model } of the most recent model call
     thinking: null, // reasoning effort
-    contextWindow: null,
     subagent: null, // descriptor of a subagent session ({mode, provider, label})
     requests: 0,
     inputTokens: 0, // prompt tokens including cache reads (board semantics)
@@ -139,7 +138,8 @@ export function foldEvent(agg, ev) {
     }
 
     case "request/context":
-      if (d.contextWindow) agg.contextWindow = num(d.contextWindow);
+      // the event carries the model's real window; every card draws the
+      // same 200k cliff instead, so there is nothing to fold
       return null;
 
     case "step/start":

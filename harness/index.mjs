@@ -13,8 +13,9 @@ import zcode from "./zcode/index.mjs";
 import hermes from "./hermes/index.mjs";
 import deepseek from "./deepseek/index.mjs";
 import mimocode from "./mimocode/index.mjs";
+import opencode from "./opencode/index.mjs";
 
-const ADAPTERS = [zcode, hermes, deepseek, mimocode];
+const ADAPTERS = [zcode, hermes, deepseek, mimocode, opencode];
 
 const byId = new Map(ADAPTERS.map((a) => [a.id, a]));
 

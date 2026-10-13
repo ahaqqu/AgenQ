@@ -1,11 +1,11 @@
 # Data sources — every file AgenQ reads
 
 AgenQ is harness-agnostic: any tool that runs AI coding sessions can appear on
-the board by mounting a **harness adapter**. ZCode, Hermes, DeepSeek Harness and MiMo Desktop ship adapters; others plug in the same way — see
+the board by mounting a **harness adapter**. ZCode, Hermes, DeepSeek Harness, MiMo Desktop and OpenCode ship adapters; others plug in the same way — see
 [`harness/README.md`](../harness/README.md) for the adapter contract.
 
 The registry namespaces every session id by harness (`zcode:sess_…`,
-`hermes:2026…`, `mimocode:ses_…`, `deepseek:session-…`), merges all harnesses into one board, and
+`hermes:2026…`, `mimocode:ses_…`, `deepseek:session-…`, `opencode:ses_…`), merges all harnesses into one board, and
 routes the lazy per-session endpoints to the harness that owns the id. Every
 board item carries a harness origin mark (boxed first letter of the harness id
 in a per-harness accent color — a blue Z, an orange H, a violet D; unknown
@@ -87,6 +87,51 @@ reasoning, cache: { read, write } }` where `input` **excludes** cache reads.
 The board reports `inputTokens = input + cache.read` so cache-hit% stays
 comparable with the other harnesses (see `harness/mimocode/tokens.mjs`).
 Archived sessions (`session.time_archived`) are excluded, matching the board.
+
+## OpenCode
+
+| Source | Used for |
+|---|---|
+| `~/.local/share/opencode/opencode.db` (`session_v2`, `project`) | session titles and project directories, the manager→subagent tree (`parent_id`), cumulative token totals (`tokens_*`), archived filter (`time_archived`), heartbeat (`time_updated`), the diff summary (`summary_*`) |
+| the same DB (`session_message`, `todo`) | per-request token sparklines and request counts, the run's standing error, todo lists, the tool trail |
+| the same DB — one session at a time, lazily per click/poll | the detail panel (current tool with arguments, latest thinking, newest turn rows, errors) and the live conversation (user/assistant text, collapsed thinking, tool chips with their final status) |
+
+OpenCode keeps every session in one SQLite DB at
+`~/.local/share/opencode/opencode.db`. On Linux/macOS that path is read
+in place; when AgenQ runs in **WSL** against a Windows install the same file
+is under `/mnt/c/Users/<user>/.local/share/opencode/opencode.db`, and the
+adapter auto-discovers `/mnt/*/Users/*/` candidates (plus `OPENCODE_DB` /
+`--opencode-db` to pin paths). Every OpenCode install found is mounted, so a
+native and a Windows install both appear on one board.
+
+Because SQLite WAL will not read over a `/mnt` 9p mount — a normal read-only
+open fails with *disk I/O error*, and `immutable=1` opens only the
+checkpointed main file and silently trails the live session — the adapter
+keeps a **local staged copy**. It copies `opencode.db` + `-wal` once, then
+refreshes only the `-wal` (a fixed-size ring, a few hundred ms) whenever it
+moves; when the main file itself changes (opencode checkpoints every few
+minutes) a whole new generation is built in the background and swapped in, so
+the board never stalls on a full copy. Copy destination is
+`--opencode-cache` (default `/tmp/agenq-opencode`).
+
+Reads are index-bounded on purpose: the newest 120 assistant rows per
+session feed the sparkline, the context peak and the standing error, and
+request counts come from an index-only `type='assistant'` count — a naive
+"every row with tokens" pass would stream a session's whole payload (file
+contents included) on every 1.5s poll.
+
+Token wire shape on assistant messages: `{ input, output, reasoning,
+cache: { read, write } }` where `input` **excludes** cache reads. The board
+reports `inputTokens = input + cache.read` so cache-hit% stays comparable
+with the other harnesses (see `harness/opencode/tokens.mjs`). Totals come
+from the session row's own `tokens_*` counters. Archived sessions
+(`session_v2.time_archived`) are excluded, matching the board.
+
+Only the **post-v2** schema (`session_v2` + `session_message`) is read. A
+data dir written by a pre-v2 OpenCode is a different product version — its
+`session_message` table still means agent/model-switched notices there, not
+conversation — so it is skipped rather than misread; open that install once
+with a current OpenCode and its history migrates in.
 
 ## Scope
 
