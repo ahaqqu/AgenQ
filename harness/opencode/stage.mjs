@@ -86,12 +86,11 @@ export class Stage {
   }
 
   /**
-   * Bring the staged copy up to date with the source.
-   * `sync` (the first sighting) awaits the copy so the first poll renders;
-   * a later checkpoint is built in the background and the current
-   * generation keeps serving until it lands.
+   * Bring the staged copy up to date with the source. The first sighting's
+   * copy is awaited so the first poll renders; a later checkpoint is built in
+   * the background and the current generation keeps serving until it lands.
    */
-  async refresh({ sync = false } = {}) {
+  async refresh() {
     const src = this.source();
     if (!src) {
       this.path = null;
@@ -106,7 +105,7 @@ export class Stage {
       return this.path;
     }
     if (this.slot < 0 || !sameStat(src.main, this.mainStat)) {
-      const p = sync || !this.path ? await this.fullCopy(src) : this.kick(src);
+      const p = !this.path ? await this.fullCopy(src) : this.kick(src);
       return p ?? this.path;
     }
     if (!sameStat(src.wal, this.walStat)) await this.walCopy();
@@ -142,10 +141,14 @@ export class Stage {
       copyFileSync(this.src, dest);
       rmSync(`${dest}-shm`, { force: true }); // rebuilt from the WAL on open
 
+      // Re-stat *after* the copy: the main check guards a checkpoint landing
+      // mid-copy, and the WAL check guards an append landing mid-copy — a WAL
+      // torn either way would pair pages that were never live together.
       const after = this.source();
-      if (!after || !sameStat(after.main, src.main)) {
-        // checkpointed while copying — this generation may mix two page
-        // generations, so drop it and let the next poll try again
+      const walAfter = statOrNull(`${this.src}-wal`);
+      if (!after || !sameStat(after.main, src.main) || !sameStat(walAfter, walBefore)) {
+        // this generation may mix two page generations, so drop it and let
+        // the next poll try again
         rmSync(target, { recursive: true, force: true });
         this.error = "opencode db was checkpointed during staging (retrying)";
         return null;
@@ -155,7 +158,7 @@ export class Stage {
       this.slot = this.slot === 0 ? 1 : 0;
       this.path = dest;
       this.mainStat = after.main;
-      this.walStat = walBefore;
+      this.walStat = walAfter;
       this.error = null;
       if (prev && prev !== target) rmSync(prev, { recursive: true, force: true });
       return dest;
@@ -173,16 +176,23 @@ export class Stage {
       const walBefore = statOrNull(`${this.src}-wal`);
       if (!walBefore) return;
       copyFileSync(`${this.src}-wal`, tmp);
-      // a checkpoint during the copy would pair a new main with this WAL
+      // A checkpoint during the copy would pair a new main with this WAL,
+      // and an append would tear the ring itself — either way the copy is
+      // dropped and the next poll retries; only a main-file move kicks a
+      // full generation, a WAL append just waits one more poll.
       const now = this.source();
-      if (!now || !sameStat(now.main, this.mainStat)) {
+      const walAfter = statOrNull(`${this.src}-wal`);
+      if (!now || !sameStat(now.main, this.mainStat) || !sameStat(walAfter, walBefore)) {
         unlinkSync(tmp);
-        if (now) this.kick(now);
+        if (now && !sameStat(now.main, this.mainStat)) this.kick(now);
         return;
       }
       renameSync(tmp, dest);
       rmSync(`${this.path}-shm`, { force: true }); // stale index for a new WAL
-      this.walStat = walBefore;
+      // Post-copy source stat, not the dest's: the ring is fixed-size, so
+      // freshness leans on mtime — a mount with coarse mtimes may delay one
+      // refresh by a poll, and that converges on the next tick.
+      this.walStat = walAfter;
       this.error = null;
     } catch (e) {
       try {
@@ -209,16 +219,15 @@ export function stageFor(src) {
 
 /**
  * Stage every configured source; returns `[{ src, path }]` for the ones that
- * produced a readable file. The first sighting's copy is awaited (so the
- * first poll has data); later checkpoints build in the background.
+ * produced a readable file. Sources are independent mounts/DBs, so they
+ * stage concurrently; the first sighting's copy is awaited (so the first
+ * poll has data) while later checkpoints build in the background.
  */
-export async function stageAll(sources, { sync = false } = {}) {
-  const out = [];
-  for (const src of sources) {
-    const path = await stageFor(src).refresh({ sync });
-    if (path) out.push({ src, path });
-  }
-  return out;
+export async function stageAll(sources) {
+  const settled = await Promise.all(
+    sources.map(async (src) => ({ src, path: await stageFor(src).refresh() })),
+  );
+  return settled.filter((s) => s.path);
 }
 
 /** Errors worth showing on the board (a failed copy, a torn retry). */
@@ -245,5 +254,3 @@ export function stagedPath(src) {
 export function peekPath(src) {
   return stageFor(src).peek();
 }
-
-export { statOrNull };

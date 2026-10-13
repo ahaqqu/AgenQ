@@ -70,25 +70,3 @@ export function openDb() {
     throw new Error(`mimocode db unreadable (${path}): ${e?.message ?? e}`);
   }
 }
-
-export function rows(db, sql, params = []) {
-  if (!db) return [];
-  return db.prepare(sql).all(...params);
-}
-
-/** JSON.parse a column, falling back to a default on malformed payloads. */
-export function jsonCol(value, fallback = null) {
-  if (value == null || value === "") return fallback;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-}
-
-/** Windows and POSIX paths both reduce to their last segment as the project name. */
-export function projectFromDir(dir) {
-  if (!dir) return null;
-  const parts = String(dir).split(/[\\/]+/).filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : null;
-}

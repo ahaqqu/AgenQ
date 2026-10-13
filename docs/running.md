@@ -34,7 +34,8 @@ profile and `%USERPROFILE%\.local\share\opencode\opencode.db`, and **all** of
 them mount — a native and a Windows install share one board. A `/mnt` source
 is staged into `--opencode-cache` (default `/tmp/agenq-opencode`); see
 [data-sources.md](data-sources.md) for why that copy is incremental rather
-than a full copy per poll.
+than a full copy per poll. `--opencode-stats-ttl` (default 60000ms) controls
+how long `/api/stats` may reuse the dashboard answer.
 
 ## Install variants
 

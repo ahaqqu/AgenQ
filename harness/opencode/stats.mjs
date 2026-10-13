@@ -2,9 +2,8 @@
 // Every assistant message carries a real timestamp plus a per-request usage
 // block, so usage can be attributed to the hour — `grain: "hour"`.
 import { cfg } from "./config.mjs";
-import { openAll, closeAll, rows, jsonCol, projectFromDir } from "./db.mjs";
-import { usageFromTokens } from "./tokens.mjs";
-import { emptyStats, localHourStart, mergeUsage } from "../lib.mjs";
+import { openAll, closeAll, idChunks, placeholders, projectLabel } from "./db.mjs";
+import { emptyStats, jsonCol, localHourStart, mergeUsage, rows, usageFromTokens } from "../lib.mjs";
 
 // The dashboard loads on demand, and the walk costs a pass over every
 // message in the history (and a staged copy first the first time) — reuse
@@ -43,43 +42,47 @@ async function compute() {
 
       const live = sessions.filter((s) => s.time_archived == null);
       const projectOf = new Map();
+      const liveIds = [];
       for (const s of live) {
-        projectOf.set(
-          s.id,
-          projectFromDir(s.directory) ||
-            projectFromDir(byId.get(s.project_id)?.worktree) ||
-            byId.get(s.project_id)?.name ||
-            (s.project_id && s.project_id !== "global" ? s.project_id : null),
-        );
+        const label = projectLabel(byId, s);
+        projectOf.set(s.id, label);
+        liveIds.push(s.id);
       }
 
-      for (const r of rows(
-        db,
-        `SELECT session_id, time_created, data FROM session_message
-         WHERE data LIKE '%"tokens"%'`,
-      )) {
-        if (!projectOf.has(r.session_id)) continue; // archived/hidden — board rule
-        const data = jsonCol(r.data, null);
-        if (!data?.tokens) continue;
-        const at = r.time_created;
-        if (at == null) continue;
-        if (minAt == null || at < minAt) minAt = at;
-        if (maxAt == null || at > maxAt) maxAt = at;
-        const u = usageFromTokens(data.tokens);
-        mergeUsage(
-          usage,
-          localHourStart(at),
-          projectOf.get(r.session_id),
-          data.model?.providerID ?? null,
-          data.model?.id ?? null,
-          {
-            requests: 1,
-            inputTokens: u.inputTokens,
-            outputTokens: u.outputTokens,
-            cacheRead: u.cacheRead,
-            cacheCreate: u.cacheCreate,
-          },
-        );
+      // The same two predicates foldAssistantWindow applies per session
+      // (`type = 'assistant'` rows carrying `data.tokens`) — stats needs the
+      // whole history rather than one window, so it walks them in SQL,
+      // scoped to live sessions (archived stay excluded, the board rule).
+      for (const chunk of idChunks(liveIds)) {
+        for (const r of rows(
+          db,
+          `SELECT session_id, time_created, data FROM session_message
+           WHERE session_id IN (${placeholders(chunk.length)})
+             AND type = 'assistant' AND data LIKE '%"tokens"%'`,
+          chunk,
+        )) {
+          const data = jsonCol(r.data, null);
+          if (!data?.tokens) continue;
+          const at = r.time_created;
+          if (at == null) continue;
+          if (minAt == null || at < minAt) minAt = at;
+          if (maxAt == null || at > maxAt) maxAt = at;
+          const u = usageFromTokens(data.tokens);
+          mergeUsage(
+            usage,
+            localHourStart(at),
+            projectOf.get(r.session_id),
+            data.model?.providerID ?? null,
+            data.model?.id ?? null,
+            {
+              requests: 1,
+              inputTokens: u.inputTokens,
+              outputTokens: u.outputTokens,
+              cacheRead: u.cacheRead,
+              cacheCreate: u.cacheCreate,
+            },
+          );
+        }
       }
 
       for (const s of live) {

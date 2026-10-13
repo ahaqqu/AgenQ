@@ -85,7 +85,7 @@ and opens that copy read-only each poll.
 Token wire shape on assistant messages (Anthropic-style): `{ input, output,
 reasoning, cache: { read, write } }` where `input` **excludes** cache reads.
 The board reports `inputTokens = input + cache.read` so cache-hit% stays
-comparable with the other harnesses (see `harness/mimocode/tokens.mjs`).
+comparable with the other harnesses (see `usageFromTokens` in `harness/lib.mjs`).
 Archived sessions (`session.time_archived`) are excluded, matching the board.
 
 ## OpenCode
@@ -123,7 +123,7 @@ contents included) on every 1.5s poll.
 Token wire shape on assistant messages: `{ input, output, reasoning,
 cache: { read, write } }` where `input` **excludes** cache reads. The board
 reports `inputTokens = input + cache.read` so cache-hit% stays comparable
-with the other harnesses (see `harness/opencode/tokens.mjs`). Totals come
+with the other harnesses (see `usageFromTokens` in `harness/lib.mjs`). Totals come
 from the session row's own `tokens_*` counters. Archived sessions
 (`session_v2.time_archived`) are excluded, matching the board.
 

@@ -2,7 +2,7 @@
 // and snapshot assembly against a tiny in-memory trajectory DB.
 import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
-import { usageFromTokens } from "./tokens.mjs";
+import { usageFromTokens } from "../lib.mjs";
 
 test("usageFromTokens folds cache reads into board input", () => {
   const u = usageFromTokens({

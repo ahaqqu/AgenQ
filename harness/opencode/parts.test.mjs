@@ -1,7 +1,8 @@
 // OpenCode adapter unit tests: the token fold the board's cache-hit rule
 // depends on, and the tool-part shapes the ticker / detail panel read.
 import { test, expect } from "bun:test";
-import { usageFromSessionColumns, usageFromTokens } from "./tokens.mjs";
+import { usageFromTokens } from "../lib.mjs";
+import { usageFromSessionColumns } from "./tokens.mjs";
 import { partText, toolEntry, toolInput, toolParts } from "./parts.mjs";
 
 test("usageFromTokens folds cache reads into board input", () => {

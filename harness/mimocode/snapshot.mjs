@@ -9,9 +9,8 @@
 //   part (see harness/deepseek/fold.mjs and public/app.js cache-hit), so
 //   inputTokens = input + cache.read and cache hit = cache.read / inputTokens.
 import { cfg, WINDOW_MS } from "./config.mjs";
-import { openDb, rows, jsonCol, projectFromDir } from "./db.mjs";
-import { usageFromTokens } from "./tokens.mjs";
-import { keepInWindow } from "../lib.mjs";
+import { openDb } from "./db.mjs";
+import { jsonCol, keepInWindow, projectFromDir, rows, usageFromTokens } from "../lib.mjs";
 
 export const ACTIVE_MS = 5 * 60_000;
 const SPARK_TAIL = 120;

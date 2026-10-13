@@ -1,17 +1,20 @@
 // AgenQ MiMo Desktop lazy per-session reads: the detail panel (current tool,
 // thinking, token breakdown) and the live-conversation feed.
 import { cfg } from "./config.mjs";
-import { openDb, rows, jsonCol, projectFromDir } from "./db.mjs";
+import { openDb } from "./db.mjs";
 import {
   CONV_INPUT_CAP,
   CONV_TAIL,
   CONV_TEXT_CAP,
   CONV_THINK_CAP,
   head,
+  jsonCol,
   parseCursor,
+  projectFromDir,
+  rows,
   tail,
+  usageFromTokens,
 } from "../lib.mjs";
-import { usageFromTokens } from "./tokens.mjs";
 
 // Board node id is either a raw session id (main) or "<sessionId>/<actorId>".
 function splitNodeId(id) {

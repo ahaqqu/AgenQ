@@ -1,5 +1,5 @@
-// AgenQ OpenCode DB access: staging-aware opens plus the small row/JSON kit
-// the adapter's reads build on.
+// AgenQ OpenCode DB access: staging-aware opens (see stage.mjs) over the
+// shared row kit in ../lib.mjs, plus the opencode-specific session helpers.
 //
 // A source only counts when it carries opencode's *current* schema
 // (`session_v2` + `session_message`). A data dir written by a pre-v2
@@ -9,6 +9,7 @@
 // a dir is skipped, not an error: see docs/data-sources.md.
 import { statSync } from "node:fs";
 import { Database } from "bun:sqlite";
+import { projectFromDir } from "../lib.mjs";
 import { cfg } from "./config.mjs";
 import { peekPath, stageAll, stageFor, stageWarnings } from "./stage.mjs";
 
@@ -26,16 +27,19 @@ function hasV2(db) {
   }
 }
 
-function openOne(path, src) {
+function openOne(path, src, { writable = false } = {}) {
   try {
     const st = statSync(path);
     if (!st.isFile() || st.size < 16) return null;
     let db;
     try {
       db = new Database(path, { readonly: true });
-    } catch {
-      // a staged generation can be opened read-write when SQLite needs to
-      // rebuild the WAL index; the cache dir is ours to write
+    } catch (ro) {
+      // A staged generation may be opened read-write when SQLite needs to
+      // rebuild the WAL index — the cache dir is ours to write. A native
+      // source is never opened writable: a failed readonly open surfaces as
+      // a board warning instead of touching the harness's live file.
+      if (!writable) throw ro;
       db = new Database(path);
     }
     if (!hasV2(db)) {
@@ -54,12 +58,13 @@ function openOne(path, src) {
  * Returns `{ dbs: [{ src, db }], warnings }`; `warnings` carries staging
  * failures (a torn copy, a full copy that could not be verified).
  */
-export async function openAll({ sync = false } = {}) {
+export async function openAll() {
   const warnings = stageWarnings(cfg.dbs);
-  const staged = await stageAll(cfg.dbs, { sync });
+  const staged = await stageAll(cfg.dbs);
   const dbs = [];
   for (const { src, path } of staged) {
-    const db = openOne(path, src);
+    // only a staged copy (path !== src) may fall back to a writable handle
+    const db = openOne(path, src, { writable: path !== src });
     if (db) dbs.push({ src, db });
   }
   return { dbs, warnings };
@@ -89,32 +94,20 @@ export function openStaged() {
       stageFor(src).refresh().catch(() => {});
       continue;
     }
-    const db = openOne(path, src);
+    const db = openOne(path, src, { writable: path !== src });
     if (db) dbs.push({ src, db });
   }
   return { dbs, warnings };
 }
 
-export function rows(db, sql, params = []) {
-  if (!db) return [];
-  return db.prepare(sql).all(...params);
-}
-
-/** JSON.parse a column, falling back to a default on malformed payloads. */
-export function jsonCol(value, fallback = null) {
-  if (value == null || value === "") return fallback;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-}
-
-/** Windows and POSIX paths both reduce to their last segment as the project name. */
-export function projectFromDir(dir) {
-  if (!dir) return null;
-  const parts = String(dir).split(/[\\/]+/).filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : null;
+/** Board project label for a session: directory, project worktree/name, or id. */
+export function projectLabel(byId, s) {
+  return (
+    projectFromDir(s.directory) ||
+    projectFromDir(byId.get(s.project_id)?.worktree) ||
+    byId.get(s.project_id)?.name ||
+    (s.project_id && s.project_id !== "global" ? s.project_id : null)
+  );
 }
 
 /** SQLite has a bound-parameter limit; chunk big id lists. */

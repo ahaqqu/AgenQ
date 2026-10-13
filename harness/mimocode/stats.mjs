@@ -2,9 +2,8 @@
 // Every assistant message carries a real timestamp plus a per-request usage
 // block, so usage can be attributed to the hour — `grain: "hour"`.
 import { cfg } from "./config.mjs";
-import { openDb, rows, jsonCol, projectFromDir } from "./db.mjs";
-import { usageFromTokens } from "./tokens.mjs";
-import { emptyStats, localHourStart, mergeUsage } from "../lib.mjs";
+import { openDb } from "./db.mjs";
+import { emptyStats, jsonCol, localHourStart, mergeUsage, projectFromDir, rows, usageFromTokens } from "../lib.mjs";
 
 export function stats() {
   const db = openDb();
