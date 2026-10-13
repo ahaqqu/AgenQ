@@ -8,7 +8,8 @@
 // machine (a native one and a Windows one), and the board merges them.
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { scanProfileDbs } from "../lib.mjs";
 
 const take = (argv, flag) => {
   const i = argv.indexOf(flag);
@@ -32,27 +33,10 @@ export function candidateDbs() {
     if (p && !out.includes(p)) out.push(p);
   };
 
-  // native Linux / macOS install (XDG data home, then the usual default)
+  // native Linux / macOS install (XDG data home, then the usual default),
+  // then every Windows profile mount — shared kit, same order
   push(join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "opencode", "opencode.db"));
-  push(join(home, ".local", "share", "opencode", "opencode.db"));
-
-  // WSL: every Windows profile mount — an opencode installed on Windows
-  try {
-    for (const drive of readdirSync("/mnt")) {
-      const usersDir = `/mnt/${drive}/Users`;
-      if (!existsSync(usersDir)) continue;
-      for (const user of readdirSync(usersDir)) {
-        push(join(usersDir, user, ".local", "share", "opencode", "opencode.db"));
-      }
-    }
-  } catch {
-    // no /mnt (not WSL) — fine
-  }
-
-  // Windows native (AgenQ is Linux-first, but the flag still works)
-  if (process.env.USERPROFILE) {
-    push(join(process.env.USERPROFILE, ".local", "share", "opencode", "opencode.db"));
-  }
+  for (const p of scanProfileDbs("opencode", "opencode.db")) push(p);
   return out;
 }
 

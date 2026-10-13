@@ -9,18 +9,20 @@
 // The detail endpoint is synchronous (the server does not await it), so it
 // reads whatever the last poll staged; the conversation feed is awaited and
 // may stage first.
-import { openAll, openStaged, closeAll, rows, jsonCol } from "./db.mjs";
+import { openAll, openStaged, closeAll } from "./db.mjs";
 import {
   CONV_INPUT_CAP,
   CONV_TAIL,
   CONV_TEXT_CAP,
   CONV_THINK_CAP,
   head,
+  jsonCol,
   parseCursor,
-  tail,
+  rows,
 } from "../lib.mjs";
 import { RECENT_LIMIT } from "./config.mjs";
-import { usageFromSessionColumns, usageFromTokens } from "./tokens.mjs";
+import { usageFromSessionColumns } from "./tokens.mjs";
+import { foldAssistantWindow } from "./fold.mjs";
 import { contentParts, partText, toolEntry, toolInput, toolParts } from "./parts.mjs";
 
 const TURNS_SHOWN = 40;
@@ -59,7 +61,8 @@ export function sessionDetail(id) {
     if (!found) return null;
     const { db, row } = found;
 
-    // newest-first assistant window: turns, context peak, errors, thinking
+    // newest-first assistant window: turns, context peak, errors, thinking,
+    // current tool — folded once (see fold.mjs)
     const window = rows(
       db,
       `SELECT time_created, data FROM session_message
@@ -67,68 +70,19 @@ export function sessionDetail(id) {
        ORDER BY seq DESC LIMIT ${RECENT_LIMIT}`,
       [id],
     );
+    const f = foldAssistantWindow(window, { turnCap: TURNS_SHOWN });
 
-    const turns = [];
-    const errors = [];
-    let maxContext = 0;
-    let thinking = null;
-    for (const r of window) {
-      const d = jsonCol(r.data, null);
-      if (!d) continue;
-      const at = d.time?.completed ?? r.time_created;
-
-      if (d.error && errors.length < 5) {
-        errors.push({
-          type: String(d.error.type ?? "error"),
-          message: String(d.error.message ?? "").slice(0, 300),
-          at,
-        });
-      }
-      if (!thinking) {
-        const text = partText(contentParts(d).find((p) => p?.type === "reasoning"));
-        if (text.trim()) thinking = { text: tail(text, 600), at: r.time_created };
-      }
-      if (!d.tokens) continue;
-      const u = usageFromTokens(d.tokens);
-      maxContext = Math.max(maxContext, u.prompt);
-      if (turns.length < TURNS_SHOWN) {
-        turns.push({
-          model_id: d.model?.id ?? null,
-          duration_ms:
-            d.time?.completed && d.time?.created ? d.time.completed - d.time.created : null,
-          input_tokens: u.inputTokens,
-          output_tokens: u.outputTokens,
-          reasoning_tokens: u.reasoningTokens,
-          cache_read: u.cacheRead,
-          cache_create: u.cacheCreate,
-          cost_usd: d.cost != null ? Number(d.cost) || 0 : null,
-          at,
-        });
-      }
-    }
-
-    // what it is doing right now — the newest tool block on the session
-    let currentTool = null;
-    for (const r of rows(
-      db,
-      `SELECT time_created, data FROM session_message
-       WHERE session_id = ? AND data LIKE '%"type":"tool"%'
-       ORDER BY time_created DESC LIMIT 4`,
-      [id],
-    )) {
-      const list = toolParts(jsonCol(r.data, null));
-      if (!list.length) continue;
-      const p = list[list.length - 1];
-      const e = toolEntry(p, r.time_created);
-      currentTool = {
-        name: e.name,
-        // raw harness vocabulary here ("running" is what the panel is for)
-        status: p.state?.status ?? "completed",
-        input: toolInput(p, 800),
-        at: e.at,
-      };
-      break;
-    }
+    // what it is doing right now — the newest tool block in the window
+    const [latest] = f.toolCalls;
+    const currentTool = latest
+      ? {
+          name: latest.name,
+          // raw harness vocabulary here ("running" is what the panel is for)
+          status: latest.rawStatus,
+          input: f.lastToolInput,
+          at: latest.at,
+        }
+      : null;
 
     const [reqs] = rows(
       db,
@@ -148,8 +102,8 @@ export function sessionDetail(id) {
         files: Number(row.summary_files) || 0,
       },
       currentTool,
-      thinking,
-      turns,
+      thinking: f.thinking,
+      turns: f.turns,
       tokens: {
         input: totals.inputTokens,
         output: totals.outputTokens,
@@ -157,9 +111,9 @@ export function sessionDetail(id) {
         cacheCreate: totals.cacheCreate,
         reasoning: totals.reasoningTokens,
         requests: Number(reqs?.n) || 0,
-        maxContext,
+        maxContext: f.maxContext,
       },
-      errors,
+      errors: f.errors.slice(0, 5).map(({ type, message, at }) => ({ type, message, at })),
       todos: todosFor(db, id),
     };
   } finally {

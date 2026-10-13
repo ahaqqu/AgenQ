@@ -4,7 +4,8 @@
 // Windows install, that same file lives under /mnt/c/Users/<user>/.local/...
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { scanProfileDbs } from "../lib.mjs";
 
 const take = (argv, flag) => {
   const i = argv.indexOf(flag);
@@ -13,7 +14,6 @@ const take = (argv, flag) => {
 
 /** Candidate mimocode.db locations, most specific first. */
 export function candidateDbs() {
-  const home = homedir();
   const out = [];
   const push = (p) => {
     if (p && !out.includes(p)) out.push(p);
@@ -22,26 +22,8 @@ export function candidateDbs() {
   // explicit env override (also used by tests)
   push(process.env.MIMOCODE_DB);
 
-  // native Linux / macOS MiMo Desktop or mimocode CLI
-  push(join(home, ".local", "share", "mimocode", "mimocode.db"));
-
-  // WSL: Windows profile mounts (every /mnt/<drive>/Users/*)
-  try {
-    for (const drive of readdirSync("/mnt")) {
-      const usersDir = `/mnt/${drive}/Users`;
-      if (!existsSync(usersDir)) continue;
-      for (const user of readdirSync(usersDir)) {
-        push(join(usersDir, user, ".local", "share", "mimocode", "mimocode.db"));
-      }
-    }
-  } catch {
-    // no /mnt (not WSL) — fine
-  }
-
-  // Windows native (AgenQ is Linux-first, but the flag still works)
-  if (process.env.USERPROFILE) {
-    push(join(process.env.USERPROFILE, ".local", "share", "mimocode", "mimocode.db"));
-  }
+  // native default, every Windows profile mount, native-Windows profile
+  for (const p of scanProfileDbs("mimocode", "mimocode.db")) push(p);
   return out;
 }
 

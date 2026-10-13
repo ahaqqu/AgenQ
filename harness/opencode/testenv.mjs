@@ -44,6 +44,10 @@ const SCHEMA = `
     time_created INTEGER, time_updated INTEGER
   );
   CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT, name TEXT);
+  -- covering indexes for the adapter's per-poll access pattern: the
+  -- session's assistant rows newest-first, and its todos in order
+  CREATE INDEX idx_session_message_session ON session_message(session_id, type, seq);
+  CREATE INDEX idx_todo_session ON todo(session_id);
 `;
 
 function session(db, s) {

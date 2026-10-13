@@ -3,6 +3,9 @@
 // Extracted when the second adapter appeared (see the zcode/hermes review of
 // PR #13) — a new adapter should map telemetry only, never re-derive these.
 import { Database } from "bun:sqlite";
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // read-only connection for this poll; a missing/corrupt DB returns null and
 // the adapter returns its empty shape instead of failing the poll
@@ -49,9 +52,71 @@ export function parseCursor(after, prefix) {
   return m ? m[1].split(":").map(Number) : null;
 }
 
-// project = last path segment of the session's working directory
-export const projectFromDir = (dir) =>
-  dir ? (dir.split("/").filter(Boolean).pop() ?? null) : null;
+// project = last path segment of the session's working directory, on either
+// separator (telemetry may carry Windows paths even when AgenQ runs on Linux)
+export const projectFromDir = (dir) => {
+  if (!dir) return null;
+  const parts = String(dir).split(/[\\/]+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : null;
+};
+
+/** JSON.parse a column, falling back to a default on malformed payloads. */
+export function jsonCol(value, fallback = null) {
+  if (value == null || value === "") return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+// Shared token fold for Anthropic-style wire usage:
+//   { input, output, reasoning, cache: { read, write } }
+// where `input` excludes cache reads. The board's `inputTokens` includes the
+// cached part so cache-hit% = cacheRead / inputTokens stays in [0, 1] — one
+// home so the adapters cannot drift on the fold.
+export function usageFromTokens(tokens) {
+  const t = tokens ?? {};
+  const cache = t.cache ?? {};
+  const input = Number(t.input) || 0;
+  const cacheRead = Number(cache.read) || 0;
+  const cacheCreate = Number(cache.write) || 0;
+  const output = Number(t.output) || 0;
+  const reasoning = Number(t.reasoning) || 0;
+  return {
+    inputTokens: input + cacheRead,
+    outputTokens: output,
+    cacheRead,
+    cacheCreate,
+    reasoningTokens: reasoning,
+    prompt: input + cacheRead,
+    total: Number(t.total) || input + cacheRead + output + reasoning + cacheCreate,
+  };
+}
+
+// Candidate DB locations for the SQLite adapters that keep one file per
+// install: the home default, every /mnt/<drive>/Users/* Windows profile
+// (WSL), and the native-Windows profile. XDG and env overrides stay with the
+// caller (adapters differ: first-hit vs every-hit, singular vs comma-split).
+// Callers probe with existsSync and keep every hit (or the first).
+export function scanProfileDbs(...suffix) {
+  const out = [join(homedir(), ".local", "share", ...suffix)];
+  try {
+    for (const drive of readdirSync("/mnt")) {
+      const usersDir = `/mnt/${drive}/Users`;
+      if (!existsSync(usersDir)) continue;
+      for (const user of readdirSync(usersDir)) {
+        out.push(join(usersDir, user, ".local", "share", ...suffix));
+      }
+    }
+  } catch {
+    // no /mnt (not WSL) — fine
+  }
+  if (process.env.USERPROFILE) {
+    out.push(join(process.env.USERPROFILE, ".local", "share", ...suffix));
+  }
+  return out;
+}
 
 // Local-calendar bucket keys for the stats dashboard. Bucketing is by the
 // user's own calendar (a "September" means the user's September, and midnight

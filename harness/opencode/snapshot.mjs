@@ -5,18 +5,21 @@
 //   * card totals  — the cumulative counters opencode keeps on the session
 //     row (`tokens_*`), so a run's totals do not depend on how many message
 //     rows this poll happened to walk;
-//   * request count — an index-only count of the session's assistant rows;
-//   * sparkline, maxContext, standing error — the newest RECENT_LIMIT
-//     assistant rows of that session;
+//   * request count — one batched `GROUP BY session_id` count of each
+//     session's assistant rows (no per-session query loop);
+//   * sparkline, maxContext, standing error, last tool — the newest
+//     RECENT_LIMIT assistant rows of that session, folded once by fold.mjs.
+//     A last tool older than that window reads as none; the window is what
+//     the card renders, so the gauge and the trail cannot disagree on it.
+//   * ticker — every tool block inside those same windows (no payload-wide
+//     `LIKE` scan: a leading-`%` LIKE satisfies no index and would stream
+//     each message's whole JSON, file contents included, on every poll);
 //   * todos — opencode's `todo` table (it is written in the same event as
-//     the model's `todowrite` call, so the table *is* the projection);
-//   * tool trail — tool blocks inside assistant messages.
+//     the model's `todowrite` call, so the table *is* the projection).
 //
-// Every read is index-bounded on purpose. A naive "all rows with tokens"
-// pass reads each message's whole JSON payload — the active session's 1000
-// rows carry tens of MB of file contents, which cost half a second per poll
-// on its own. Walking backwards with LIMIT reads exactly what is rendered
-// and nothing else (see harness/opencode/profile notes in the PR).
+// Every read is index-bounded on purpose: the `(session_id, type, seq)`
+// shape the queries assume keeps each poll to the rows it renders and
+// nothing else.
 //
 // maxContext is deliberately the biggest prompt *inside that window*: it is
 // the same points the sparkline draws, so the gauge and the chart cannot
@@ -31,10 +34,10 @@
 // says *running* while the session has written something in the last five
 // minutes and *sleep* afterwards.
 import { cfg, RECENT_LIMIT, WINDOW_MS } from "./config.mjs";
-import { openAll, closeAll, rows, jsonCol, projectFromDir, idChunks, placeholders } from "./db.mjs";
-import { usageFromSessionColumns, usageFromTokens } from "./tokens.mjs";
-import { toolEntry, toolParts } from "./parts.mjs";
-import { keepInWindow } from "../lib.mjs";
+import { openAll, closeAll, idChunks, placeholders, projectLabel } from "./db.mjs";
+import { usageFromSessionColumns } from "./tokens.mjs";
+import { foldAssistantWindow } from "./fold.mjs";
+import { jsonCol, keepInWindow, rows } from "../lib.mjs";
 
 export const ACTIVE_MS = 5 * 60_000;
 const TICKER_LIMIT = 80;
@@ -62,20 +65,26 @@ function gatherOne(db, now) {
   const kept = live.filter((s) => keep.has(s.id));
   const ids = kept.map((s) => s.id);
   if (!ids.length) {
-    return { projects, kept, counts: new Map(), recent: [], tools: new Map(), todos: [], ticker: [] };
+    return { projects, kept, counts: new Map(), recent: [], todos: [] };
   }
 
   const counts = new Map();
   const recent = [];
-  const tools = new Map();
+  // one batched count for every session — no per-session query loop
+  for (const chunk of idChunks(ids)) {
+    for (const r of rows(
+      db,
+      `SELECT session_id, count(*) AS n FROM session_message
+        WHERE session_id IN (${placeholders(chunk.length)}) AND type = 'assistant'
+        GROUP BY session_id`,
+      chunk,
+    )) {
+      counts.set(r.session_id, r.n);
+    }
+  }
   for (const id of ids) {
-    // index-only: `(session_id, type, seq)` — no payload is read at all
-    counts.set(
-      id,
-      rows(db, `SELECT count(*) AS n FROM session_message WHERE session_id = ? AND type = 'assistant'`, [id])[0]
-        ?.n ?? 0,
-    );
-    // walk the same index backwards and stop after RECENT_LIMIT rows
+    // walk the (session_id, type, seq) index backwards and stop after
+    // RECENT_LIMIT rows — the only payloads this poll reads
     recent.push({
       id,
       rows: rows(
@@ -86,14 +95,6 @@ function gatherOne(db, now) {
         [id],
       ),
     });
-    const tool = rows(
-      db,
-      `SELECT time_created, data FROM session_message
-       WHERE session_id = ? AND data LIKE '%"type":"tool"%'
-       ORDER BY time_created DESC LIMIT 1`,
-      [id],
-    )[0];
-    if (tool) tools.set(id, tool);
   }
 
   // SQLite's bound-parameter limit: chunk the id list and concatenate.
@@ -114,28 +115,7 @@ function gatherOne(db, now) {
     ),
   );
 
-  const ticker = inChunks((chunk, ph) =>
-    rows(
-      db,
-      `SELECT session_id, time_created, data FROM session_message
-       WHERE session_id IN (${ph}) AND time_created >= ?
-         AND data LIKE '%"type":"tool"%'
-       ORDER BY time_created DESC LIMIT ${TICKER_LIMIT}`,
-      [...chunk, now - WINDOW_MS],
-    ),
-  );
-
-  return { projects, kept, counts, recent, tools, todos, ticker };
-}
-
-function projectLabel(projects, s) {
-  const byId = new Map(projects.map((p) => [p.id, p]));
-  return (
-    projectFromDir(s.directory) ||
-    projectFromDir(byId.get(s.project_id)?.worktree) ||
-    byId.get(s.project_id)?.name ||
-    (s.project_id && s.project_id !== "global" ? s.project_id : null)
-  );
+  return { projects, kept, counts, recent, todos };
 }
 
 function modelOf(s) {
@@ -144,43 +124,6 @@ function modelOf(s) {
     return { model: parsed.id ?? null, provider: parsed.providerID ?? null };
   }
   return { model: null, provider: null };
-}
-
-/**
- * Fold one session's newest-first assistant rows into its sparkline, context
- * peak and standing error. Newest-first matters: the first `error` met is
- * the run's latest failure, and any successful request seen before it is
- * newer — which is what clears an older failure.
- */
-function foldRecent(node, rowsNewestFirst, requests) {
-  node.requests = requests;
-  const prompts = [];
-  let successSeen = false;
-  let err = null;
-  for (const r of rowsNewestFirst) {
-    const data = jsonCol(r.data, null);
-    if (!data) continue;
-    if (!err && data.error) {
-      err = {
-        type: String(data.error.type ?? "error"),
-        message: String(data.error.message ?? "").slice(0, 300),
-        at: data.time?.completed ?? r.time_created,
-        cleared: successSeen,
-      };
-      continue;
-    }
-    if (!data.tokens) continue;
-    if (data.error) continue;
-    successSeen = true;
-    const u = usageFromTokens(data.tokens);
-    prompts.push(u.prompt);
-    node.maxContext = Math.max(node.maxContext, u.prompt);
-    if (u.reasoningTokens > 0) node.thinking = node.thinking ?? "reasoning";
-    const at = data.time?.completed ?? r.time_created;
-    if (at != null && (node.lastAt == null || at > node.lastAt)) node.lastAt = at;
-  }
-  node.sparkline = prompts.reverse();
-  node.lastError = err && !err.cleared ? { type: err.type, message: err.message, at: err.at } : null;
 }
 
 function assemble(parts, now) {
@@ -222,6 +165,7 @@ function assemble(parts, now) {
 
   // ---- session shells (before any edge is wired, so a parent can land later)
   for (const { projects, kept } of parts) {
+    const byId = new Map(projects.map((p) => [p.id, p]));
     for (const s of kept) {
       ensure(s.id, {
         title: s.title || null,
@@ -229,7 +173,7 @@ function assemble(parts, now) {
         // the UI groups sibling instances by parentSessionId, and a subagent's
         // own parent is what makes "2 of 5" mean a run rather than the board
         parentSessionId: s.parent_id || null,
-        project: projectLabel(projects, s),
+        project: projectLabel(byId, s),
         directory: s.directory || null,
         firstAt: s.time_created ?? null,
         lastAt: s.time_updated ?? s.time_created ?? null,
@@ -244,14 +188,48 @@ function assemble(parts, now) {
     }
   }
 
-  // ---- per-session windows: sparkline, context peak, standing error
+  // ---- per-session windows: sparkline, context peak, standing error,
+  // last tool and ticker — all folded once from the rows already read
+  const ticker = [];
+  const cutoff = now - WINDOW_MS;
   for (const { counts, recent } of parts) {
     for (const { id, rows: window } of recent) {
       const node = nodes.get(id);
       if (!node) continue;
-      foldRecent(node, window, counts.get(id) ?? 0);
+      const f = foldAssistantWindow(window);
+      node.requests = counts.get(id) ?? 0;
+      node.sparkline = f.prompts;
+      node.maxContext = f.maxContext;
+      if (f.hasReasoning) node.thinking = node.thinking ?? "reasoning";
+      if (f.lastSuccessAt != null && (node.lastAt == null || f.lastSuccessAt > node.lastAt)) {
+        node.lastAt = f.lastSuccessAt;
+      }
+      node.lastError = f.standingError;
+      const [latest] = f.toolCalls;
+      if (latest) {
+        node.lastTool = {
+          name: latest.name,
+          outputBytes: latest.outputBytes,
+          status: latest.status,
+          at: latest.at,
+          exitCode: latest.exitCode,
+        };
+      }
+      for (const t of f.toolCalls) {
+        if (t.at != null && t.at >= cutoff) {
+          ticker.push({
+            sessionId: id,
+            tool: t.name,
+            status: t.status,
+            at: t.at,
+            outputBytes: t.outputBytes,
+            exitCode: t.exitCode,
+          });
+        }
+      }
     }
   }
+  ticker.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
 
   // ---- todos (the table is opencode's own projection of the todowrite call)
   for (const { todos } of parts) {
@@ -261,34 +239,6 @@ function assemble(parts, now) {
       node.todos.push({ content: t.content, status: t.status === "completed" ? "done" : t.status });
     }
   }
-
-  // ---- tool trail: last tool per card, plus the ticker
-  const ticker = [];
-  for (const { tools } of parts) {
-    for (const [sid, r] of tools) {
-      const node = nodes.get(sid);
-      const list = toolParts(jsonCol(r.data, null));
-      if (!node || !list.length) continue;
-      const e = toolEntry(list[list.length - 1], r.time_created);
-      node.lastTool = { name: e.name, outputBytes: e.outputBytes, status: e.status, at: e.at, exitCode: e.exitCode };
-    }
-  }
-  for (const { ticker: rows_ } of parts) {
-    for (const r of rows_) {
-      for (const p of toolParts(jsonCol(r.data, null))) {
-        const e = toolEntry(p, r.time_created);
-        ticker.push({
-          sessionId: r.session_id,
-          tool: e.name,
-          status: e.status,
-          at: e.at,
-          outputBytes: e.outputBytes,
-          exitCode: e.exitCode,
-        });
-      }
-    }
-  }
-  ticker.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
 
   // ---- status + context cliff
   for (const s of nodes.values()) {
@@ -311,7 +261,7 @@ function assemble(parts, now) {
     .filter((n) => !n.parentId || !byId.has(n.parentId))
     .map((n) => n.id);
 
-  return { sessions: [...nodes.values()], roots, ticker };
+  return { sessions: [...nodes.values()], roots, ticker: ticker.slice(0, TICKER_LIMIT) };
 }
 
 export async function snapshot({ now = Date.now() } = {}) {
