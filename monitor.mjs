@@ -82,6 +82,13 @@ function startServer(port) {
     port,
     // the stop action makes this no longer harmless to expose — loopback only
     hostname: "127.0.0.1",
+    // Bun drops a connection after ~10s of socket inactivity, and a long
+    // in-flight request (a cold /api/stats call decodes a whole telemetry
+    // history — the stats page's refresh button warns it "may take a while")
+    // sends no bytes while it computes, so it counts as idle and the client
+    // gets an empty reply. 255 is Bun's ceiling; keep it at the max so every
+    // one-shot page load survives its cold first pass.
+    idleTimeout: 255,
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === "/api/stop" && req.method === "POST") {
